@@ -1,40 +1,38 @@
 from rest_framework import serializers
-from .models import Vault, LoginInfo, File
-from .encryption_utils import AESEncryption
+from .models import Vault, LoginInfo, File, SharedVault, SharedItem
+
 
 class VaultSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vault
         fields = ['id', 'owner', 'team', 'name']
 
-class LoginInfoSerializer(serializers.ModelSerializer):
-    decrypted_password = serializers.SerializerMethodField()
 
+class LoginInfoSerializer(serializers.ModelSerializer):
     class Meta:
         model = LoginInfo
-        fields = ['id', 'vault', 'login_username', 'login_password', 'decrypted_password']
-
-    def get_decrypted_password(self, obj):
-        aes = AESEncryption()
-        return aes.decrypt(obj.login_password)
-
-    def create(self, validated_data):
-        aes = AESEncryption()
-        validated_data['login_password'] = aes.encrypt(validated_data['login_password'])
-        return super().create(validated_data)
+        fields = ['id', 'vault', 'login_username', 'login_password']
 
 class FileSerializer(serializers.ModelSerializer):
-    decrypted_content = serializers.SerializerMethodField()
-
     class Meta:
         model = File
-        fields = ['id', 'vault', 'file_name', 'file_content', 'decrypted_content']
+        fields = ['id', 'vault', 'file_name', 'file_content']
 
-    def get_decrypted_content(self, obj):
-        aes = AESEncryption()
-        return aes.decrypt(obj.file_content)
 
-    def create(self, validated_data):
-        aes = AESEncryption()
-        validated_data['file_content'] = aes.encrypt(validated_data['file_content'])
-        return super().create(validated_data)
+# Sharing serializers
+class SharedItemSerializer(serializers.ModelSerializer):
+    item_type = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SharedItem
+        fields = ['share_link', 'shared_by',
+                  'shared_at', 'expiry_date', 'item_type']
+
+    def get_item_type(self, obj):
+        return obj.content_type.model
+
+
+class SharedVaultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SharedVault
+        fields = ['share_link', 'shared_by', 'shared_at', 'expiry_date']
