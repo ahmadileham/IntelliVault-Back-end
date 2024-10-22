@@ -1,10 +1,11 @@
 from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
-from .utils import AESEncryption, create_shared_item_link, create_shared_vault_link, decrypt_item
+from .utils import AESEncryption, create_share_item, create_share_vault, decrypt_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem
 from django.contrib.contenttypes.models import ContentType
+from django.urls import reverse
 
 
 def encrypt_data(data):
@@ -94,12 +95,18 @@ class ShareItemView(views.APIView):
             else:
                 return Response({'error': 'Invalid item type'}, status=status.HTTP_400_BAD_REQUEST)
 
-            content_type = ContentType.objects.get_for_model(item_model)
             item = item_model.objects.get(id=item_id)
 
-            shared_item = create_shared_item_link(item, request.user, password)
+            shared_item = create_share_item(item, request.user, password)
 
-            return Response(SharedItemSerializer(shared_item).data, status=status.HTTP_201_CREATED)
+            # Build the full URL for the share link
+            full_share_link = request.build_absolute_uri(reverse('access-shared-item', args=[shared_item.share_link]))
+
+            # Include the full URL in the response
+            response_data = SharedItemSerializer(shared_item).data
+            response_data['share_link'] = full_share_link
+
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except item_model.DoesNotExist:
             return Response({'error': 'Item not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -111,8 +118,15 @@ class ShareVaultView(views.APIView):
     def post(self, request, vault_id, password):
         try:
             vault = Vault.objects.get(id=vault_id)
-            shared_vault = create_shared_vault_link(
+            shared_vault = create_share_vault(
                 vault, request.user, password)
+            
+            # Build the full URL for the share link
+            full_share_link = request.build_absolute_uri(reverse('access-shared-vault', args=[shared_vault.share_link]))
+
+            # Include the full URL in the response
+            response_data = SharedVaultSerializer(shared_vault).data
+            response_data['share_link'] = full_share_link
 
             return Response(SharedVaultSerializer(shared_vault).data, status=status.HTTP_201_CREATED)
 

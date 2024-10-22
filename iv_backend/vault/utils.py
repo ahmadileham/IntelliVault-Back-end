@@ -39,7 +39,7 @@ class AESEncryption:
         return data.decode('utf-8')
     
 # Custom Method for Generating Links with Expiry
-def create_shared_item_link(item, user, password, expiry_days=7):
+def create_share_item(item, user, password, expiry_days=7):
     hashed_password = make_password(password)
     expiry_date = timezone.now() + timedelta(days=expiry_days)
     
@@ -51,7 +51,7 @@ def create_shared_item_link(item, user, password, expiry_days=7):
         expiry_date=expiry_date
     )
 
-def create_shared_vault_link(vault, user, password, expiry_days=7):
+def create_share_vault(vault, user, password, expiry_days=7):
     hashed_password = make_password(password)
     expiry_date = timezone.now() + timedelta(days=expiry_days)
     
