@@ -12,6 +12,9 @@ class Vault(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='vaults', null=True, blank=True)
     name = models.CharField(max_length=100)
 
+    def __str__(self):
+        return self.name + ' - ' + self.owner.username
+
 class Item(models.Model):
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -25,7 +28,7 @@ class LoginInfo(Item):
 
 class File(Item):
     file_name = models.CharField(max_length=255)
-    file_content = models.TextField()  # Encrypted file content
+    file_content = models.BinaryField()  # Encrypted file content
 
 # Sharing Models
 

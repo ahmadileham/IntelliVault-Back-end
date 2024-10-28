@@ -4,7 +4,6 @@ from django.contrib.auth.hashers import check_password
 from .utils import AESEncryption, create_share_item, create_share_vault, decrypt_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem
-from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 
 
@@ -44,17 +43,29 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
 
         # Decrypt login passwords before sending response
+        decrypted_data = []
         for item in serializer.data:
-            item['decrypted_password'] = decrypt_data(item['login_password'])
+            decrypted_item = item.copy()
+            decrypted_item['decrypted_password'] = decrypt_data(item['login_password'])
+            decrypted_data.append(decrypted_item)
 
-        return Response(serializer.data)
+        return Response(decrypted_data)
 
     def create(self, request, *args, **kwargs):
+        # Create a mutable copy of request.data
+        mutable_data = request.data.copy()
+        
         # Encrypt password before saving
-        request.data['login_password'] = encrypt_data(
-            request.data['login_password'])
-        return super().create(request, *args, **kwargs)
+        mutable_data['login_password'] = encrypt_data(
+            mutable_data.get('login_password', '')
+        )
 
+        # Pass the modified data to the serializer
+        serializer = self.get_serializer(data=mutable_data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class FileViewSet(viewsets.ModelViewSet):
     serializer_class = FileSerializer
@@ -85,42 +96,48 @@ class FileViewSet(viewsets.ModelViewSet):
 class ShareItemView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request, item_id, password):
+    def post(self, request, item_id):
+        password = request.data.get('password')  # Retrieve password from POST data
+        
         try:
-            item_type = request.data.get('item_type')
-            if item_type == 'logininfo':
-                item_model = LoginInfo
-            elif item_type == 'file':
-                item_model = File
-            else:
-                return Response({'error': 'Invalid item type'}, status=status.HTTP_400_BAD_REQUEST)
-
-            item = item_model.objects.get(id=item_id)
-
+            # Dynamically determine the item type by checking if the item exists in LoginInfo or File models
+            try:
+                item = LoginInfo.objects.get(id=item_id)
+                item_type = 'logininfo'
+            except LoginInfo.DoesNotExist:
+                item = File.objects.get(id=item_id)
+                item_type = 'file'
+            
+            # Create shared item with the identified type and password
             shared_item = create_share_item(item, request.user, password)
-
+            
             # Build the full URL for the share link
             full_share_link = request.build_absolute_uri(reverse('access-shared-item', args=[shared_item.share_link]))
 
             # Include the full URL in the response
             response_data = SharedItemSerializer(shared_item).data
             response_data['share_link'] = full_share_link
-
+            response_data['item_type'] = item_type  # Optionally include item type for clarity
+            
             return Response(response_data, status=status.HTTP_201_CREATED)
 
-        except item_model.DoesNotExist:
+        except (LoginInfo.DoesNotExist, File.DoesNotExist):
             return Response({'error': 'Item not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class ShareVaultView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request, vault_id, password):
+    def post(self, request, vault_id):
+        password = request.data.get('password')  # Retrieve password from POST data
+        
         try:
+            # Check if the vault exists
             vault = Vault.objects.get(id=vault_id)
-            shared_vault = create_share_vault(
-                vault, request.user, password)
-            
+
+            # Create shared vault with the provided password
+            shared_vault = create_share_vault(vault, request.user, password)
+
             # Build the full URL for the share link
             full_share_link = request.build_absolute_uri(reverse('access-shared-vault', args=[shared_vault.share_link]))
 
@@ -128,7 +145,7 @@ class ShareVaultView(views.APIView):
             response_data = SharedVaultSerializer(shared_vault).data
             response_data['share_link'] = full_share_link
 
-            return Response(SharedVaultSerializer(shared_vault).data, status=status.HTTP_201_CREATED)
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except Vault.DoesNotExist:
             return Response({'error': 'Vault not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -136,7 +153,10 @@ class ShareVaultView(views.APIView):
 
 # Accessing shared vaults and items
 class AccessSharedItemView(views.APIView):
-    def post(self, request, share_link, password):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, share_link):
+        password = request.data.get('password')  # Get password from request data
         try:
             shared_item = SharedItem.objects.get(share_link=share_link)
 
@@ -158,9 +178,11 @@ class AccessSharedItemView(views.APIView):
         except SharedItem.DoesNotExist:
             return Response({'error': 'Shared item not found'}, status=status.HTTP_404_NOT_FOUND)
 
-
 class AccessSharedVaultView(views.APIView):
-    def post(self, request, share_link, password):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, share_link):
+        password = request.data.get('password')  # Get password from request data
         try:
             shared_vault = SharedVault.objects.get(share_link=share_link)
 
@@ -171,14 +193,11 @@ class AccessSharedVaultView(views.APIView):
             # Validate the access password
             if check_password(password, shared_vault.access_password):
                 # Get all LoginInfo and File items in the vault
-                login_items = LoginInfo.objects.filter(
-                    vault=shared_vault.vault)
+                login_items = LoginInfo.objects.filter(vault=shared_vault.vault)
                 file_items = File.objects.filter(vault=shared_vault.vault)
 
-                decrypted_login_items = [decrypt_item(
-                    login) for login in login_items]
-                decrypted_file_items = [
-                    decrypt_item(file) for file in file_items]
+                decrypted_login_items = [decrypt_item(login) for login in login_items]
+                decrypted_file_items = [decrypt_item(file) for file in file_items]
 
                 # Return the decrypted vault items
                 return Response({
