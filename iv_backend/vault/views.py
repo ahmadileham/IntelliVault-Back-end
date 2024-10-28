@@ -52,6 +52,15 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         return Response(decrypted_data)
 
     def create(self, request, *args, **kwargs):
+        vault_id = request.data.get('vault')
+
+        # Check if the vault exists and belongs to the authenticated user
+        try:
+            vault = Vault.objects.get(id=vault_id, owner=request.user)
+        except Vault.DoesNotExist:
+            return Response({'error': 'You do not have permission to add items to this vault.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
         
@@ -86,6 +95,15 @@ class FileViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
+        vault_id = request.data.get('vault')
+
+        # Check if the vault exists and belongs to the authenticated user
+        try:
+            vault = Vault.objects.get(id=vault_id, owner=request.user)
+        except Vault.DoesNotExist:
+            return Response({'error': 'You do not have permission to add files to this vault.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        
         # Encrypt file content before saving
         request.data['file_content'] = encrypt_data(
             request.data['file_content'])
