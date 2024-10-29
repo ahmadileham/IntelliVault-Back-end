@@ -8,11 +8,21 @@ from datetime import timedelta
 from .models import SharedItem, SharedVault, LoginInfo, File
 from django.utils import timezone
 from django.utils.crypto import get_random_string
+import hvac
 
 class AESEncryption:
     def __init__(self):
-        # Hardcoded secret key for development (must be 32 bytes for AES-256)
-        self.key = b'hardcodedsecretkeythatis32bytes!'
+        # Initialize the Vault client
+        self.client = hvac.Client(url='http://127.0.0.1:8200')
+
+        # Replace with your actual Role ID and Secret ID
+        role_id = 'a5760b73-ab65-954f-0c46-a7c7a6d6b6b4'  # Replace this with the actual role ID you retrieved
+        secret_id = 'ab22b01b-4a48-3e98-048a-d70dd11f2984'  # Replace this with the actual secret ID you generated
+        self.client.auth.approle.login(role_id=role_id, secret_id=secret_id)
+
+        # Fetch the secret key from Vault
+        secret = self.client.secrets.kv.v2.read_secret_version(path='aes-key')
+        self.key = base64.b64decode(secret['data']['data']['key'])
 
     def encrypt(self, data: str) -> str:
         iv = os.urandom(16)
@@ -37,7 +47,7 @@ class AESEncryption:
         data = unpadder.update(padded_data) + unpadder.finalize()
 
         return data.decode('utf-8')
-    
+
 # Custom Method for Generating Links with Expiry
 def create_share_item(item, user, password, expiry_days=7):
     hashed_password = make_password(password)
