@@ -9,20 +9,42 @@ from .models import SharedItem, SharedVault, LoginInfo, File
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 import hvac
+import environ
+
+# Initialize environ and load conf.env file
+env = environ.Env()
+environ.Env.read_env("conf.env")
 
 class AESEncryption:
     def __init__(self):
-        # Initialize the Vault client
-        self.client = hvac.Client(url='http://127.0.0.1:8200')
+        # Initialize the Vault client with the address from environment variables
+        self.client = hvac.Client(url=env('VAULT_ADDR'))
 
-        # Replace with your actual Role ID and Secret ID
-        role_id = 'a5760b73-ab65-954f-0c46-a7c7a6d6b6b4'  # Replace this with the actual role ID you retrieved
-        secret_id = 'ab22b01b-4a48-3e98-048a-d70dd11f2984'  # Replace this with the actual secret ID you generated
-        self.client.auth.approle.login(role_id=role_id, secret_id=secret_id)
+        # Retrieve Role ID and Secret ID from environment variables
+        self.role_id = env('VAULT_ROLE_ID')
+        self.secret_id = env('VAULT_SECRET_ID')
+
+        # Authenticate with AppRole
+        self.login_to_vault()
 
         # Fetch the secret key from Vault
-        secret = self.client.secrets.kv.v2.read_secret_version(path='aes-key')
-        self.key = base64.b64decode(secret['data']['data']['key'])
+        self.fetch_secret_key()
+
+    def login_to_vault(self):
+        try:
+            self.client.auth.approle.login(role_id=self.role_id, secret_id=self.secret_id)
+            print("Successfully logged in to Vault.")
+        except Exception as e:
+            raise Exception("Failed to login to Vault.")
+
+    def fetch_secret_key(self):
+        try:
+            secret_response = self.client.secrets.kv.v1.read_secret(path="aes-key")
+            key_base64 = secret_response["data"]["value"]
+            self.key = base64.b64decode(key_base64)
+            print("Successfully retrieved AES key.")
+        except Exception as e:
+            print("nigga")
 
     def encrypt(self, data: str) -> str:
         iv = os.urandom(16)
