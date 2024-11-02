@@ -33,7 +33,7 @@ class AESEncryption:
     def login_to_vault(self):
         try:
             self.client.auth.approle.login(role_id=self.role_id, secret_id=self.secret_id)
-            print("Successfully logged in to Vault.")
+            # print("Successfully logged in to Vault.")
         except Exception as e:
             raise Exception("Failed to login to Vault.")
 
@@ -42,7 +42,7 @@ class AESEncryption:
             secret_response = self.client.secrets.kv.v1.read_secret(path="aes-key")
             key_base64 = secret_response["data"]["value"]
             self.key = base64.b64decode(key_base64)
-            print("Successfully retrieved AES key.")
+            # print("Successfully retrieved AES key.")
         except Exception as e:
             print("nigga")
 
