@@ -26,10 +26,10 @@ urlpatterns = [
 
 
     # Sharing URLs
-    path('share/<str:item_type>/<int:item_id>/',
-         ShareItemView.as_view(), name='share-item'),
     path('share/vault/<int:vault_id>/',
-         ShareVaultView.as_view(), name='share-vault'),
+         ShareVaultView.as_view(), name='share-vault'), # This url must be above to prevent 'vault' from being treated as 'item_type'
+    path('share/<str:item_type>/<int:item_id>/', 
+         ShareItemView.as_view(), name='share-item'),
 
     # Accessing Shared Items/Vaults
     path('access/item/<str:share_link>/',
