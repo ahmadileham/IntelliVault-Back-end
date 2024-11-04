@@ -21,11 +21,9 @@ class VaultViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only return vaults that belong to the authenticated user
         return Vault.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
-        # Set the owner as the authenticated user when creating a vault
         serializer.save(owner=self.request.user)
 
 
@@ -34,7 +32,6 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only return login info that belongs to vaults owned by the authenticated user
         return LoginInfo.objects.filter(vault__owner=self.request.user)
 
     def list(self, request, *args, **kwargs):
@@ -87,11 +84,11 @@ class FileViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         # Validate and get the uploaded file
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)  # Validate the input data
+        serializer.is_valid(raise_exception=True)
 
         file_uploaded = request.FILES.get(
             'file_uploaded')  # Get the uploaded file
-        vault_id = request.data['vault']  # Use the validated vault ID directly
+        vault_id = request.data['vault']
 
         # Check if the vault exists and belongs to the authenticated user
         try:
@@ -102,13 +99,13 @@ class FileViewSet(viewsets.ModelViewSet):
 
         # Encrypt file content before saving
         encrypted_content = aes.encrypt_file_content(
-            file_uploaded.read())  # Encrypt the uploaded file content
+            file_uploaded.read())
 
         mime_type, _ = mimetypes.guess_type(file_uploaded.name)
 
         # Create the file instance with encrypted content
         file_instance = File.objects.create(
-            vault=vault,  # Use the vault instance directly
+            vault=vault,
             file_name=file_uploaded.name,
             file_content=encrypted_content,
             mime_type=mime_type
@@ -123,12 +120,9 @@ class FileDownloadView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, file_id, share_link=None):
-        # Retrieve the file based on file_id
         file = get_object_or_404(File, id=file_id)
 
-        # Check if the user is the file owner
         if file.vault.owner == request.user:
-            # Owner is accessing the file
             decrypted_content = aes.decrypt_file_content(file.file_content)
             return self._build_file_response(file, decrypted_content)
 
@@ -153,9 +147,9 @@ class FileDownloadView(views.APIView):
         for resource_model in (SharedItem, SharedVault):
             try:
                 if resource_model == SharedItem:
-                    # Get the content type for the File model
+
                     file_content_type = ContentType.objects.get_for_model(File)
-                    # Check for a SharedItem that matches the share link and the file
+
                     shared_resource = resource_model.objects.get(
                         share_link=share_link,
                         content_type=file_content_type,
@@ -202,14 +196,14 @@ class ShareItemView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, item_type, item_id):
-        # Retrieve password from POST data
+
         password = request.data.get('password')
 
         if item_type not in ['logininfo', 'file']:
             return Response({'error': 'Invalid item type'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Dynamically determine the item type by checking if the item exists in LoginInfo or File models
+
             if item_type == Item.LOGININFO:
                 item = LoginInfo.objects.get(id=item_id)
             elif item_type == Item.FILE:
@@ -218,13 +212,13 @@ class ShareItemView(views.APIView):
             # Create shared item with the identified type and password
             shared_item = create_share_item(item, request.user, password)
 
-            # Build the full URL for the share link
             full_share_link = request.build_absolute_uri(
                 reverse('access-shared-item', args=[shared_item.share_link]))
 
             # Include the full URL in the response
             response_data = SharedItemSerializer(shared_item).data
             response_data['share_link'] = full_share_link
+
             # Optionally include item type for clarity
             response_data['item_type'] = item_type
 
@@ -238,11 +232,9 @@ class ShareVaultView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, vault_id):
-        # Retrieve password from POST data
         password = request.data.get('password')
 
         try:
-            # Check if the vault exists
             vault = Vault.objects.get(id=vault_id)
 
             # Create shared vault with the provided password
@@ -267,20 +259,19 @@ class AccessSharedItemView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, share_link):
-        # Get password from request data
         password = request.data.get('password')
         try:
             shared_item = SharedItem.objects.get(share_link=share_link)
 
-            # Check if the link has expired
             if shared_item.has_expired():
                 return Response({'error': 'Link has expired'}, status=status.HTTP_403_FORBIDDEN)
 
             # Validate the access password
             if check_password(password, shared_item.access_password):
-                # Decrypt the shared item and pass the share_link for file download
+                # Unpack the shared item and pass the share_link and request for file download url
                 item_data = unpack_shared_item(
                     shared_item.item, share_link, request)
+
                 if item_data is not None:
                     return Response({'message': 'Access granted', 'item': item_data}, status=status.HTTP_200_OK)
                 return Response({'error': 'Unsupported item type'}, status=status.HTTP_400_BAD_REQUEST)
@@ -296,12 +287,10 @@ class AccessSharedVaultView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, share_link):
-        # Get password from request data
         password = request.data.get('password')
         try:
             shared_vault = SharedVault.objects.get(share_link=share_link)
 
-            # Check if the link has expired
             if shared_vault.has_expired():
                 return Response({'error': 'Link has expired'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -312,10 +301,11 @@ class AccessSharedVaultView(views.APIView):
                     vault=shared_vault.vault)
                 file_items = File.objects.filter(vault=shared_vault.vault)
 
-                decrypted_login_items = [unpack_shared_item(
-                    login) for login in login_items]
+                decrypted_login_items = [
+                    unpack_shared_item(login) for login in login_items
+                ]
+
                 decrypted_file_items = [
-                    # Pass share_link for files
                     unpack_shared_item(file, share_link, request) for file in file_items
                 ]
 
