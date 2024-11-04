@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
 from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer
-from .models import Vault, LoginInfo, File, SharedVault, SharedItem
+from .models import Vault, Item, LoginInfo, File, SharedVault, SharedItem
 from django.urls import reverse
 import mimetypes
 from django.http import HttpResponse
@@ -201,18 +201,19 @@ class FileDownloadView(views.APIView):
 class ShareItemView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request, item_id):
+    def post(self, request, item_type, item_id):
         # Retrieve password from POST data
         password = request.data.get('password')
 
+        if item_type not in ['logininfo', 'file']:
+            return Response({'error': 'Invalid item type'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             # Dynamically determine the item type by checking if the item exists in LoginInfo or File models
-            try:
+            if item_type == Item.LOGININFO:
                 item = LoginInfo.objects.get(id=item_id)
-                item_type = 'logininfo'
-            except LoginInfo.DoesNotExist:
+            elif item_type == Item.FILE:
                 item = File.objects.get(id=item_id)
-                item_type = 'file'
 
             # Create shared item with the identified type and password
             shared_item = create_share_item(item, request.user, password)

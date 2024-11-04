@@ -21,6 +21,10 @@ class Vault(models.Model):
 
 
 class Item(models.Model):
+
+    FILE = 'file'
+    LOGININFO = 'logininfo'
+
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
