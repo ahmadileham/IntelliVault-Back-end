@@ -35,6 +35,7 @@ class LoginInfo(Item):
 class File(Item):
     file_name = models.CharField(max_length=255)
     file_content = models.BinaryField()  # Encrypted file content
+    mime_type = models.CharField(max_length=255)
 
 # Sharing Models
 

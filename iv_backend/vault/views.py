@@ -5,16 +5,12 @@ from .utils import AESEncryption, create_share_item, create_share_vault, decrypt
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem
 from django.urls import reverse
+import mimetypes
+from django.http import HttpResponse
+from rest_framework.decorators import action
 
 
-def encrypt_data(data):
-    aes = AESEncryption()
-    return aes.encrypt(data)
-
-
-def decrypt_data(data):
-    aes = AESEncryption()
-    return aes.decrypt(data)
+aes = AESEncryption() 
 
 
 class VaultViewSet(viewsets.ModelViewSet):
@@ -46,7 +42,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         decrypted_data = []
         for item in serializer.data:
             decrypted_item = item.copy()
-            decrypted_item['decrypted_password'] = decrypt_data(item['login_password'])
+            decrypted_item['decrypted_password'] = aes.decrypt_login_password(item['login_password'])
             decrypted_data.append(decrypted_item)
 
         return Response(decrypted_data)
@@ -65,7 +61,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         mutable_data = request.data.copy()
         
         # Encrypt password before saving
-        mutable_data['login_password'] = encrypt_data(
+        mutable_data['login_password'] = aes.encrypt_login_password(
             mutable_data.get('login_password', '')
         )
 
@@ -81,34 +77,66 @@ class FileViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only return files that belong to vaults owned by the authenticated user
         return File.objects.filter(vault__owner=self.request.user)
 
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-
-        # Decrypt file contents before sending response
-        for item in serializer.data:
-            item['decrypted_content'] = decrypt_data(item['file_content'])
-
-        return Response(serializer.data)
-
     def create(self, request, *args, **kwargs):
-        vault_id = request.data.get('vault')
+        # Validate and get the uploaded file
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)  # Validate the input data
 
+        file_uploaded = request.FILES.get('file_uploaded')  # Get the uploaded file
+        vault_id = request.data['vault']  # Use the validated vault ID directly
+        
         # Check if the vault exists and belongs to the authenticated user
         try:
             vault = Vault.objects.get(id=vault_id, owner=request.user)
         except Vault.DoesNotExist:
             return Response({'error': 'You do not have permission to add files to this vault.'},
                             status=status.HTTP_403_FORBIDDEN)
-        
-        # Encrypt file content before saving
-        request.data['file_content'] = encrypt_data(
-            request.data['file_content'])
-        return super().create(request, *args, **kwargs)
 
+        # Encrypt file content before saving
+        encrypted_content = aes.encrypt_file_content(file_uploaded.read())  # Encrypt the uploaded file content
+
+        mime_type, _ = mimetypes.guess_type(file_uploaded.name)
+
+        # Create the file instance with encrypted content
+        file_instance = File.objects.create(
+            vault=vault,  # Use the vault instance directly
+            file_name=file_uploaded.name,
+            file_content=encrypted_content,
+            mime_type=mime_type
+        )
+
+        # Serialize the created instance to return
+        response_serializer = self.get_serializer(file_instance)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
+    def retrieve(self, request, *args, **kwargs):
+        # Decrypt file content for viewing
+        file_instance = self.get_object()
+        serializer = self.get_serializer(file_instance)
+
+        # Decrypt the content for the response
+        decrypted_content = aes.decrypt_file_content(file_instance.file_content)
+
+        # Add decrypted content to response data
+        response_data = serializer.data
+        response_data['decrypted_content'] = decrypted_content
+
+        return Response(response_data)
+    
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        # Retrieve the file instance
+        file_instance = self.get_object()
+
+        # Decrypt the content
+        decrypted_content = aes.decrypt_file_content(file_instance.file_content)
+
+        # Create the response with the decrypted content
+        response = HttpResponse(decrypted_content, content_type=file_instance.mime_type)
+        response['Content-Disposition'] = f'attachment; filename="{file_instance.file_name}"'
+        return response
 
 # Sharing views
 class ShareItemView(views.APIView):
