@@ -2,7 +2,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase, APIClient
 from django.contrib.auth import get_user_model
-from .models import Vault, LoginInfo, SharedItem, SharedVault
+from .models import Item, Vault, LoginInfo, SharedItem, SharedVault
 from .utils import AESEncryption
 from datetime import timedelta
 from django.utils import timezone
@@ -46,7 +46,7 @@ class VaultAppAPITestCase(APITestCase):
         data = {
             'vault': self.vault.id,
             'login_username': 'example_user',
-            'login_password': self.aes.encrypt('example_pass')
+            'login_password': self.aes.encrypt_login_password('example_pass')
         }
         response = self.client.post(reverse(self.login_info_list_url), data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -56,7 +56,7 @@ class VaultAppAPITestCase(APITestCase):
         LoginInfo.objects.create(
             vault=self.vault,
             login_username='example_user',
-            login_password=self.aes.encrypt('example_pass')
+            login_password=self.aes.encrypt_login_password('example_pass')
         )
         response = self.client.get(reverse(self.login_info_list_url))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -69,11 +69,11 @@ class VaultAppAPITestCase(APITestCase):
         login_info = LoginInfo.objects.create(
             vault=self.vault,
             login_username='share_user',
-            login_password=self.aes.encrypt('share_pass')
+            login_password=self.aes.encrypt_login_password('share_pass')
         )
         data = {'password': 'access_password'}
         response = self.client.post(
-            reverse(self.share_item_url, args=[login_info.id]), data
+            reverse(self.share_item_url, args=[Item.LOGININFO,login_info.id]), data
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn('share_link', response.data)
@@ -91,7 +91,7 @@ class VaultAppAPITestCase(APITestCase):
         login_info = LoginInfo.objects.create(
             vault=self.vault,
             login_username='access_user',
-            login_password=self.aes.encrypt('access_pass')
+            login_password=self.aes.encrypt_login_password('access_pass')
         )
         shared_item = SharedItem.objects.create(
             item=login_info,

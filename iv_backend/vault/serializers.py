@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem
+import base64
 
 
 class VaultSerializer(serializers.ModelSerializer):
@@ -14,9 +15,19 @@ class LoginInfoSerializer(serializers.ModelSerializer):
         fields = ['id', 'vault', 'login_username', 'login_password']
 
 class FileSerializer(serializers.ModelSerializer):
+    file_uploaded = serializers.FileField(write_only=True)  # Include the file upload field
+    file_content = serializers.CharField(read_only=True)  
+
     class Meta:
         model = File
-        fields = ['id', 'vault', 'file_name', 'file_content']
+        fields = ['id', 'vault', 'file_name', 'file_uploaded', 'file_content']  # Include fields needed for the API
+    
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # Encode the file_content as base64
+        representation['file_content'] = base64.b64encode(instance.file_content).decode('utf-8')
+        return representation
+
 
 
 # Sharing serializers

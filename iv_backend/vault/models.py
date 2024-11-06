@@ -4,6 +4,7 @@ from django.utils.crypto import get_random_string
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
+from django.contrib.contenttypes.fields import GenericRelation
 
 from collaboration.models import Team
 
@@ -20,6 +21,10 @@ class Vault(models.Model):
 
 
 class Item(models.Model):
+
+    FILE = 'file'
+    LOGININFO = 'logininfo'
+
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -30,11 +35,14 @@ class Item(models.Model):
 class LoginInfo(Item):
     login_username = models.CharField(max_length=100)
     login_password = models.TextField()  # Encrypted password
+    shared_items = GenericRelation('SharedItem')
 
 
 class File(Item):
     file_name = models.CharField(max_length=255)
     file_content = models.BinaryField()  # Encrypted file content
+    mime_type = models.CharField(max_length=255)
+    shared_items = GenericRelation('SharedItem')
 
 # Sharing Models
 
@@ -57,8 +65,14 @@ class SharedBase(models.Model):
 class SharedVault(SharedBase):
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
 
+    def __str__(self):
+        return self.vault.name + ' - ' + self.shared_by.username
+
 
 class SharedItem(SharedBase):
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.PositiveIntegerField()
     item = GenericForeignKey('content_type', 'object_id')
+
+    def __str__(self):
+        return self.item.__class__.__name__ + ' - ' + self.shared_by.username
