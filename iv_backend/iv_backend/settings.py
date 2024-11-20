@@ -27,7 +27,7 @@ SECRET_KEY = 'cubaan'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['10.0.2.2','127.0.0.1']
 
 
 # Application definition
@@ -128,7 +128,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         "NAME": "iv_db",
         "USER": "postgres",
-        "PASSWORD": "12345678",
+        "PASSWORD": "123",
         "HOST": "localhost",
         "PORT": "5432",
     }
@@ -186,7 +186,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',  
+        'rest_framework.authentication.TokenAuthentication',
+        #'rest_framework.authentication.SessionAuthentication',  
     ),
 }
 

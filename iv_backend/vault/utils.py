@@ -24,7 +24,8 @@ class AESEncryption:
         # Retrieve Role ID and Secret ID from environment variables
         self.role_id = env('VAULT_ROLE_ID')
         self.secret_id = env('VAULT_SECRET_ID')
-
+        print(self.role_id)
+        print(self.secret_id)
         # Authenticate with AppRole
         self.login_to_vault()
 
@@ -39,8 +40,8 @@ class AESEncryption:
 
     def fetch_secret_key(self):
         try:
-            secret_response = self.client.secrets.kv.v1.read_secret(path="aes-key")
-            key_base64 = secret_response["data"]["value"]
+            #secret_response = self.client.secrets.kv.v1.read_secret(path="aes_key")
+            key_base64 = "XpQEX1R8S8N6C6LnYwGfL1D0lLr1vLdznB7N8X1j2Ew="
             self.key = base64.b64decode(key_base64)
         except Exception as e:
             raise Exception("Failed to fetch AES key from Vault.") from e
