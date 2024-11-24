@@ -1,4 +1,6 @@
 from rest_framework import serializers
+
+from authentication.serializers import CustomUserSerializer
 from .models import Team, TeamMembership, Invitation
 
 class TeamSerializer(serializers.ModelSerializer):
@@ -16,6 +18,9 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'team', 'role']
 
 class InvitationSerializer(serializers.ModelSerializer):
+    team = TeamSerializer()  
+    sender = CustomUserSerializer()
+
     class Meta:
         model = Invitation
         fields = ['id', 'team', 'recipient', 'sender', 'status', 'expiration_date']
