@@ -1,3 +1,4 @@
+from django.forms import ValidationError
 from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
@@ -34,44 +35,79 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return LoginInfo.objects.filter(vault__owner=self.request.user)
 
+    def encrypt_password(self, data):
+        """Encrypt the login password if it exists in the data."""
+        if 'login_password' in data and data['login_password']:
+            try:
+                data['login_password'] = aes.encrypt_login_password(
+                    data['login_password'])
+            except Exception as e:
+                raise ValidationError(
+                    {"error": f"Password encryption failed: {str(e)}"})
+        return data
+
+    def decrypt_passwords(self, serialized_data):
+        """Decrypt passwords for a list of serialized data."""
+        decrypted_data = []
+        for item in serialized_data:
+            try:
+                decrypted_item = item.copy()
+                decrypted_item['decrypted_password'] = aes.decrypt_login_password(
+                    item['login_password'])
+                decrypted_data.append(decrypted_item)
+            except Exception as e:
+                raise ValidationError(
+                    {"error": f"Password decryption failed: {str(e)}"})
+        return decrypted_data
+
+    def validate_vault_ownership(self, vault_id, user):
+        """Check if the vault belongs to the authenticated user."""
+        try:
+            return Vault.objects.get(id=vault_id, owner=user)
+        except Vault.DoesNotExist:
+            raise ValidationError(
+                {"error": "You do not have permission to modify this vault."})
+
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
 
         # Decrypt login passwords before sending response
-        decrypted_data = []
-        for item in serializer.data:
-            decrypted_item = item.copy()
-            decrypted_item['decrypted_password'] = aes.decrypt_login_password(
-                item['login_password'])
-            decrypted_data.append(decrypted_item)
-
+        decrypted_data = self.decrypt_passwords(serializer.data)
         return Response(decrypted_data)
 
     def create(self, request, *args, **kwargs):
         vault_id = request.data.get('vault')
+        self.validate_vault_ownership(vault_id, request.user)
 
-        # Check if the vault exists and belongs to the authenticated user
-        try:
-            vault = Vault.objects.get(id=vault_id, owner=request.user)
-        except Vault.DoesNotExist:
-            return Response({'error': 'You do not have permission to add items to this vault.'},
-                            status=status.HTTP_403_FORBIDDEN)
-
-        # Create a mutable copy of request.data
-        mutable_data = request.data.copy()
-
-        # Encrypt password before saving
-        mutable_data['login_password'] = aes.encrypt_login_password(
-            mutable_data.get('login_password', '')
-        )
-
-        # Pass the modified data to the serializer
+        # Encrypt password and validate data
+        mutable_data = self.encrypt_password(request.data.copy())
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        # Validate vault ownership if `vault` is in the request
+        vault_id = request.data.get('vault')
+        if vault_id:
+            self.validate_vault_ownership(vault_id, request.user)
+
+        # Encrypt password and validate data
+        mutable_data = self.encrypt_password(request.data.copy())
+        serializer = self.get_serializer(
+            instance, data=mutable_data, partial=kwargs.get('partial', False))
+
+        try:
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+        except Exception as e:
+            return Response({"error": f"Failed to update: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.data)
 
 
 class FileViewSet(viewsets.ModelViewSet):
