@@ -1,7 +1,16 @@
+import os
+import pickle
+from turtle import st
+from django.conf import settings
 from django.forms import ValidationError
+import numpy as np
+import requests
 from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
+
+from iv_backend.feature import FeatureExtraction
+from iv_backend.model_utils import load_model, predict
 from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer
 from .models import Vault, Item, LoginInfo, File, SharedVault, SharedItem
@@ -12,9 +21,16 @@ import random
 import string
 from django.shortcuts import get_object_or_404
 from django.contrib.contenttypes.models import ContentType
+import re
+from urllib.parse import urlparse
+import ipaddress
 
 
 aes = AESEncryption()
+model = load_model()
+# file = open("models/newmodel.pkl","rb")
+# gbc = pickle.load(file)
+# file.close()
 
 
 class VaultViewSet(viewsets.ModelViewSet):
@@ -212,19 +228,65 @@ class FileDownloadView(views.APIView):
                 continue  # Try the next resource model if not found
 
         return None
+    
+class AIView(views.APIView):
+    permission_classes = [permissions.AllowAny]
 
-    def _build_file_response(self, file, decrypted_content):
-        random_string = ''.join(random.choices(
-            string.ascii_letters + string.digits, k=5))
+    def get(self, request):
+        # Return a simple response
+        return Response({"message": "Hello, World!"})
+    
+    def post(self, request):
+        try:
+            # Retrieve and validate fields as integers
+            time = int(request.data.get("time"))
+            attempt = int(request.data.get("attempt"))
+            location = int(request.data.get("location"))
+            input_data = [time,attempt,location]
+        except (ValueError, TypeError) as e:
+            # Return a 400 error if any field is invalid or missing
+            return Response(
+                {"error": "All fields (time, attempt, location) must be integers."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Append random string to the filename
-        file_name, file_extension = file.file_name.rsplit('.', 1)
-        new_file_name = f"{file_name}-{random_string}.{file_extension}"
+        # Return success response if all validations pass
 
-        # Construct the response with decrypted file content and MIME type
-        response = HttpResponse(decrypted_content, content_type=file.mime_type)
-        response['Content-Disposition'] = f'attachment; filename="{new_file_name}"'
-        return response
+        # Make prediction
+        prediction = predict(model, input_data)
+        #return JsonResponse({'success':True,'prediction' :'normal' if prediction[0] == 1 else 'anomalous' },status= status.HTTP_200_OK)
+        return Response(
+            {"message": f"Data received successfully. Time: {time}, Attempt: {attempt}, Location: {location}", "prediction" :'normal' if prediction[0] == 1 else 'anomalous' },
+            status=status.HTTP_200_OK
+        )
+
+class AnotherAIView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        try:
+            # Example of another post request logic
+            link = request.data.get("link")
+            if not link:
+                return Response(
+                    {"error": "'link' is required in the request body."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except Exception as e:
+            return Response(
+                {"error": "Something went wrong.", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        #prediction = predict1(model1, extract_features(link))
+        # obj = FeatureExtraction(link)
+        # x = np.array(obj.getFeaturesList()).reshape(1,30) 
+        # y_pred =gbc.predict(x)[0]
+
+        return Response(
+            {"message": f"Another POST request processed successfully. Data: {link}", "Prediction" : ""},
+            status=status.HTTP_200_OK,
+        )
+
 
 
 # Sharing views
@@ -357,3 +419,5 @@ class AccessSharedVaultView(views.APIView):
 
         except SharedVault.DoesNotExist:
             return Response({'error': 'Shared vault not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+
