@@ -12,6 +12,9 @@ import random
 import string
 from django.shortcuts import get_object_or_404
 from django.contrib.contenttypes.models import ContentType
+from collaboration.models import Team, TeamMembership
+from django.core.exceptions import PermissionDenied
+from rest_framework.decorators import action
 
 
 aes = AESEncryption()
@@ -25,7 +28,30 @@ class VaultViewSet(viewsets.ModelViewSet):
         return Vault.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        team_id = self.request.data.get('team')
+        if team_id:
+            team = get_object_or_404(Team, id=team_id)
+
+            # Ensure the user is an admin of the team
+            if not TeamMembership.objects.filter(user=self.request.user, team=team, role=TeamMembership.ADMIN).exists():
+                raise PermissionDenied(
+                    "Only team admins can create vaults for the team.")
+
+            serializer.save(owner=self.request.user, team=team)
+        else:
+            serializer.save(owner=self.request.user)
+
+    @action(detail=True, methods=['get'])
+    def team_vaults(self, request, pk=None):
+        team = get_object_or_404(Team, pk=pk)
+
+        # Ensure the user is a member of the team
+        if not TeamMembership.objects.filter(user=request.user, team=team).exists():
+            raise PermissionDenied("You are not a member of this team.")
+
+        vaults = Vault.objects.filter(team=team)
+        serializer = self.get_serializer(vaults, many=True)
+        return Response(serializer.data)
 
 
 class LoginInfoViewSet(viewsets.ModelViewSet):

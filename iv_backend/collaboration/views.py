@@ -8,7 +8,8 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
-
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.decorators import action
 
 class TeamViewSet(viewsets.ModelViewSet):
     serializer_class = TeamSerializer
@@ -25,6 +26,13 @@ class TeamViewSet(viewsets.ModelViewSet):
         # Create a TeamMembership instance for the creator with the role of admin
         TeamMembership.objects.create(
             user=self.request.user, team=team, role='admin')
+        
+    @action(detail=False, methods=['get'])
+    def my_teams(self, request):
+        memberships = TeamMembership.objects.filter(user=request.user)
+        teams = [membership.team for membership in memberships]
+        serializer = self.get_serializer(teams, many=True)
+        return Response(serializer.data)
 
 
 class TeamMembershipViewSet(viewsets.ModelViewSet):
@@ -38,6 +46,15 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Set the user as the authenticated user when creating a team membership
         serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        membership = self.get_object()
+
+        # Ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
+            raise PermissionDenied("Only team admins can modify roles.")
+        
+        serializer.save()
 
 
 class CreateInvitationView(APIView):
