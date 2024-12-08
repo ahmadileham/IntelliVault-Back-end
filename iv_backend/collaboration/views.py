@@ -8,6 +8,8 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.decorators import action
 
 
 class TeamViewSet(viewsets.ModelViewSet):
@@ -23,8 +25,14 @@ class TeamViewSet(viewsets.ModelViewSet):
         team = serializer.save(creator=self.request.user)
 
         # Create a TeamMembership instance for the creator with the role of admin
-        TeamMembership.objects.create(
-            user=self.request.user, team=team, role='admin')
+        TeamMembership.objects.create(user=self.request.user, team=team, role="admin")
+
+    @action(detail=False, methods=["get"])
+    def my_teams(self, request):
+        memberships = TeamMembership.objects.filter(user=request.user)
+        teams = [membership.team for membership in memberships]
+        serializer = self.get_serializer(teams, many=True)
+        return Response(serializer.data)
 
 
 class TeamMembershipViewSet(viewsets.ModelViewSet):
@@ -39,6 +47,17 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
         # Set the user as the authenticated user when creating a team membership
         serializer.save(user=self.request.user)
 
+    def perform_update(self, serializer):
+        membership = self.get_object()
+
+        # Ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(
+            user=self.request.user, team=membership.team, role=TeamMembership.ADMIN
+        ).exists():
+            raise PermissionDenied("Only team admins can modify roles.")
+
+        serializer.save()
+
 
 class CreateInvitationView(APIView):
     permission_classes = [IsAuthenticated]
@@ -47,13 +66,17 @@ class CreateInvitationView(APIView):
         team = get_object_or_404(Team, id=team_id)
 
         # Check if the user is an admin of the team
-        if not TeamMembership.objects.filter(user=request.user, team=team, role='admin').exists():
-            return Response({'detail': 'Only team admins can invite members.'}, status=status.HTTP_403_FORBIDDEN)
+        if not TeamMembership.objects.filter(
+            user=request.user, team=team, role="admin"
+        ).exists():
+            return Response(
+                {"detail": "Only team admins can invite members."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-        recipient_id = request.data.get('recipient_id')
+        recipient_id = request.data.get("recipient_id")
         User = get_user_model()  # Get the user model
-        recipient = get_object_or_404(
-            User, id=recipient_id)  # Use the user model
+        recipient = get_object_or_404(User, id=recipient_id)  # Use the user model
 
         # Create the invitation with a 7-day expiration date
         invitation = Invitation.objects.create(
@@ -62,7 +85,9 @@ class CreateInvitationView(APIView):
             sender=request.user,
         )
 
-        return Response(InvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
+        return Response(
+            InvitationSerializer(invitation).data, status=status.HTTP_201_CREATED
+        )
 
 
 class RespondInvitationView(APIView):
@@ -70,27 +95,38 @@ class RespondInvitationView(APIView):
 
     def post(self, request, invitation_id):
         invitation = get_object_or_404(
-            Invitation, id=invitation_id, recipient=request.user)
+            Invitation, id=invitation_id, recipient=request.user
+        )
 
         if invitation.is_expired():
-            return Response({'detail': 'This invitation has expired.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "This invitation has expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        action = request.data.get('action')
+        action = request.data.get("action")
         if action == Invitation.ACCEPT:
             invitation.status = Invitation.ACCEPTED
             invitation.save()
 
             # Add the user to the team as a member
             TeamMembership.objects.create(
-                user=request.user, team=invitation.team, role=TeamMembership.MEMBER)
-            return Response({'detail': 'Invitation accepted.'}, status=status.HTTP_200_OK)
+                user=request.user, team=invitation.team, role=TeamMembership.MEMBER
+            )
+            return Response(
+                {"detail": "Invitation accepted."}, status=status.HTTP_200_OK
+            )
 
         elif action == Invitation.REJECT:
             invitation.status = Invitation.REJECTED
             invitation.save()
-            return Response({'detail': 'Invitation rejected.'}, status=status.HTTP_200_OK)
+            return Response(
+                {"detail": "Invitation rejected."}, status=status.HTTP_200_OK
+            )
 
-        return Response({'detail': 'Invalid action.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Invalid action."}, status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 class InvitationListView(APIView):
@@ -98,6 +134,9 @@ class InvitationListView(APIView):
 
     def get(self, request):
         invitations = Invitation.objects.filter(
-            recipient=request.user, status=Invitation.PENDING, expiration_date__gte=timezone.now())
+            recipient=request.user,
+            status=Invitation.PENDING,
+            expiration_date__gte=timezone.now(),
+        )
         serializer = InvitationSerializer(invitations, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
