@@ -18,6 +18,10 @@ class Vault(models.Model):
 
     def __str__(self):
         return self.name + ' - ' + self.owner.username
+    
+    @property
+    def is_team_vault(self):
+        return self.team is not None
 
 
 class Item(models.Model):
@@ -43,6 +47,46 @@ class File(Item):
     file_content = models.BinaryField()  # Encrypted file content
     mime_type = models.CharField(max_length=255)
     shared_items = GenericRelation('SharedItem')
+
+class TeamActionRequest(models.Model):
+    ADD = 'add'
+    EDIT = 'edit'
+    DELETE = 'delete'
+
+    ACTION_CHOICES = [
+        (ADD, 'Add'),
+        (EDIT, 'Edit'),
+        (DELETE, 'Delete'),
+    ]
+
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+
+    STATUS_CHOICES = [
+        (PENDING, 'Pending'),
+        (APPROVED, 'Approved'),
+        (REJECTED, 'Rejected'),
+    ]
+
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='action_requests')
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='approved_actions', null=True, blank=True)
+    team_vault = models.ForeignKey(
+        Vault, on_delete=models.CASCADE, related_name='action_requests')
+    action_type = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    item_type = models.CharField(max_length=50)  # 'LoginInfo' or 'File'
+    item_data = models.JSONField()  # Store serialized data for the item
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=PENDING
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.action_type.capitalize()} request for {self.item_type} by {self.requester.username}"
+
 
 # Sharing Models
 
