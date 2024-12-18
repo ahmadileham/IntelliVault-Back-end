@@ -134,7 +134,7 @@ def unpack_shared_item(item, share_link=None, request=None):
         }
     return None
 
-def handle_team_vault_action(action, user, team, item_type, target=None, data=None):
+def create_team_vault_action(action, user, team, item_type, target=None, data=None):
     """
     Handles CRUD operations for LoginInfo/File instances in team vaults by creating
     a pending TeamActionRequest.
@@ -147,7 +147,7 @@ def handle_team_vault_action(action, user, team, item_type, target=None, data=No
     :param data: The data for creating or updating an instance.
     """
     if action not in ["create", "update", "delete"]:
-        raise ValueError("Invalid action. Must be 'add', 'update', or 'delete'.")
+        raise ValueError("Invalid action. Must be 'create', 'update', or 'delete'.")
 
     # Create a TeamActionRequest
     action_request = TeamVaultActionRequest.objects.create(

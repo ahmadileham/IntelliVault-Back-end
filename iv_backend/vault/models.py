@@ -49,12 +49,12 @@ class File(Item):
     shared_items = GenericRelation('SharedItem')
 
 class TeamVaultActionRequest(models.Model):
-    ADD = 'add'
+    CREATE = 'create'
     EDIT = 'edit'
     DELETE = 'delete'
 
     ACTION_CHOICES = [
-        (ADD, 'Add'),
+        (CREATE, 'Create'),
         (EDIT, 'Edit'),
         (DELETE, 'Delete'),
     ]
@@ -71,7 +71,7 @@ class TeamVaultActionRequest(models.Model):
 
     requester = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='action_requests')
-    action_by = models.ForeignKey(
+    authorized_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='vault_actions', null=True, blank=True)
     team_vault = models.ForeignKey(
         Vault, on_delete=models.CASCADE, related_name='action_requests')
@@ -82,7 +82,7 @@ class TeamVaultActionRequest(models.Model):
         max_length=10, choices=STATUS_CHOICES, default=PENDING
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    authorized_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.action_type.capitalize()} request for {self.item_type} by {self.requester.username}"
