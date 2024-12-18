@@ -48,7 +48,7 @@ class File(Item):
     mime_type = models.CharField(max_length=255)
     shared_items = GenericRelation('SharedItem')
 
-class TeamActionRequest(models.Model):
+class TeamVaultActionRequest(models.Model):
     ADD = 'add'
     EDIT = 'edit'
     DELETE = 'delete'
@@ -71,11 +71,11 @@ class TeamActionRequest(models.Model):
 
     requester = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='action_requests')
-    admin = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='approved_actions', null=True, blank=True)
+    action_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='vault_actions', null=True, blank=True)
     team_vault = models.ForeignKey(
         Vault, on_delete=models.CASCADE, related_name='action_requests')
-    action_type = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
     item_type = models.CharField(max_length=50)  # 'LoginInfo' or 'File'
     item_data = models.JSONField()  # Store serialized data for the item
     status = models.CharField(

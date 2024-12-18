@@ -1,6 +1,6 @@
 from django.contrib.auth.hashers import make_password
 from datetime import timedelta
-from .models import SharedItem, SharedVault, LoginInfo, File
+from .models import SharedItem, SharedVault, LoginInfo, File, TeamVaultActionRequest
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -133,3 +133,31 @@ def unpack_shared_item(item, share_link=None, request=None):
             'file_download_link': file_download_link,  # Return the download link
         }
     return None
+
+def handle_team_vault_action(action, user, team, item_type, target=None, data=None):
+    """
+    Handles CRUD operations for LoginInfo/File instances in team vaults by creating
+    a pending TeamActionRequest.
+
+    :param action_type: One of "create", "update", "delete".
+    :param user: The user performing the action.
+    :param team: The team associated with the action.
+    :param item_type: The type of item being created/updated/deleted.
+    :param target: The target instance (for update/delete).
+    :param data: The data for creating or updating an instance.
+    """
+    if action not in ["create", "update", "delete"]:
+        raise ValueError("Invalid action. Must be 'add', 'update', or 'delete'.")
+
+    # Create a TeamActionRequest
+    action_request = TeamVaultActionRequest.objects.create(
+        team_vault=team,
+        action=action,
+        status=TeamVaultActionRequest.PENDING,
+        requester=user,
+        item_type=item_type,
+        item_data=data,
+        created_at=timezone.now(),
+    )
+
+    return action_request

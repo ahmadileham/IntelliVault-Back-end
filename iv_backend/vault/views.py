@@ -104,6 +104,13 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         vault_id = request.data.get('vault')
+        vault = Vault.objects.get(id=vault_id)
+
+        if vault.is_team_vault:
+            # create action request
+            pass
+        
+        
         self.validate_vault_ownership(vault_id, request.user)
 
         # Encrypt password and validate data
