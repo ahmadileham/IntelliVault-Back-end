@@ -80,8 +80,17 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         vault = instance.vault
 
         # For personal vaults, update directly
-        if vault.is_team_vault:
-            return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
+        if not vault.is_team_vault:
+            self.validate_vault_ownership(vault.id, request.user)
+            mutable_data = self.encrypt_password(request.data.copy())
+            serializer = self.get_serializer(
+                instance, data=mutable_data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        
+        return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
 
     def delete(self, request, *args, **kwargs):
         instance = self.get_object()
