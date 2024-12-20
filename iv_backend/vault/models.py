@@ -50,12 +50,12 @@ class File(Item):
 
 class TeamVaultActionRequest(models.Model):
     CREATE = 'create'
-    EDIT = 'edit'
+    UPDATE = 'update'
     DELETE = 'delete'
 
     ACTION_CHOICES = [
         (CREATE, 'Create'),
-        (EDIT, 'Edit'),
+        (UPDATE, 'Update'),
         (DELETE, 'Delete'),
     ]
 
@@ -76,7 +76,7 @@ class TeamVaultActionRequest(models.Model):
     team_vault = models.ForeignKey(
         Vault, on_delete=models.CASCADE, related_name='action_requests')
     action = models.CharField(max_length=10, choices=ACTION_CHOICES)
-    item_type = models.CharField(max_length=50)  # 'LoginInfo' or 'File'
+    item_type = models.CharField(max_length=50)
     item_data = models.JSONField()  # Store serialized data for the item
     status = models.CharField(
         max_length=10, choices=STATUS_CHOICES, default=PENDING

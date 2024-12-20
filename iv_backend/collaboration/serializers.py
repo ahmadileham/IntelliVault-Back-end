@@ -9,11 +9,15 @@ class TeamSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'created_at', 'creator']
 
 class TeamMembershipSerializer(serializers.ModelSerializer):
-    user = serializers.ReadOnlyField(source='user.username')
+    username = serializers.ReadOnlyField(source='user.username')
+    team_name = serializers.SerializerMethodField()
+
+    def get_team_name(self, obj):
+        return obj.team.name
 
     class Meta:
         model = TeamMembership
-        fields = ['id', 'user', 'team', 'role']
+        fields = ['id', 'user', 'username','team', 'role', 'team_name']
 
 class InvitationSerializer(serializers.ModelSerializer):
     class Meta:

@@ -134,14 +134,14 @@ def unpack_shared_item(item, share_link=None, request=None):
         }
     return None
 
-def create_team_vault_action(action, user, team, item_type, target=None, data=None):
+def create_team_vault_action_request(action, user, vault, item_type, target=None, data=None):
     """
     Handles CRUD operations for LoginInfo/File instances in team vaults by creating
     a pending TeamActionRequest.
 
     :param action_type: One of "create", "update", "delete".
     :param user: The user performing the action.
-    :param team: The team associated with the action.
+    :param team: The team vault associated with the action.
     :param item_type: The type of item being created/updated/deleted.
     :param target: The target instance (for update/delete).
     :param data: The data for creating or updating an instance.
@@ -151,7 +151,7 @@ def create_team_vault_action(action, user, team, item_type, target=None, data=No
 
     # Create a TeamActionRequest
     action_request = TeamVaultActionRequest.objects.create(
-        team_vault=team,
+        team_vault=vault,
         action=action,
         status=TeamVaultActionRequest.PENDING,
         requester=user,
