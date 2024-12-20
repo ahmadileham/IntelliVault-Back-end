@@ -80,16 +80,8 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         vault = instance.vault
 
         # For personal vaults, update directly
-        if not vault.is_team_vault:
-            self.validate_vault_ownership(vault.id, request.user)
-            mutable_data = self.encrypt_password(request.data.copy())
-            serializer = self.get_serializer(
-                instance, data=mutable_data, partial=True)
-            serializer.is_valid(raise_exception=True)
-            self.perform_update(serializer)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
+        if vault.is_team_vault:
+            return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
 
     def delete(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -115,6 +107,13 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         mutable_data = request.data.copy()
         if action != TeamVaultActionRequest.DELETE:
             mutable_data = self.encrypt_password(mutable_data)
+
+        # Add the instance ID to mutable_data for UPDATE and DELETE actions
+        if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE]:
+            if instance is None:
+                raise ValidationError(
+                    {"error": "Instance is required for UPDATE or DELETE actions."})
+            mutable_data['id'] = instance.id  # Append the instance ID
 
         action_request = create_team_vault_action_request(
             action,
@@ -447,12 +446,16 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             item_data = action_request.item_data
 
             # Remove any fields that are not part of the model
-            model_fields = {field.name for field in LoginInfo._meta.get_fields()}
-            filtered_item_data = {key: value for key, value in item_data.items() if key in model_fields}
+            model_fields = {
+                field.name for field in LoginInfo._meta.get_fields()}
+            filtered_item_data = {
+                key: value for key, value in item_data.items() if key in model_fields}
 
             # Convert the vault ID to a Vault instance
-            vault_id = filtered_item_data.pop('vault')  # Remove 'vault' from item_data
-            vault = get_object_or_404(Vault, id=vault_id)  # Fetch the Vault instance
+            # Remove 'vault' from item_data
+            vault_id = filtered_item_data.pop('vault')
+            # Fetch the Vault instance
+            vault = get_object_or_404(Vault, id=vault_id)
 
             if action_request.item_type == Item.LOGININFO:
                 # Add the Vault instance to item_data
@@ -462,13 +465,34 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
                 # Add the Vault instance to item_data
                 filtered_item_data['vault'] = vault
                 File.objects.create(**filtered_item_data)
+
         elif action_request.action == TeamVaultActionRequest.UPDATE:
             # Update the item
-            target = action_request.target
-            for attr, value in action_request.item_data.items():
+            item_data = action_request.item_data
+
+            # Ensure the `id` is included in item_data
+            if 'id' not in item_data:
+                return Response({'detail': 'Missing "id" in item_data for update action.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Dynamically fetch the target object based on item_type
+            if action_request.item_type == Item.LOGININFO:
+                target = get_object_or_404(LoginInfo, id=item_data.get('id'))
+            elif action_request.item_type == Item.FILE:
+                target = get_object_or_404(File, id=item_data.get('id'))
+            else:
+                return Response({'detail': 'Invalid item type.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Convert the vault ID to a Vault instance
+            vault_id = item_data.pop('vault')  # Remove 'vault' from item_data
+            vault = get_object_or_404(Vault, id=vault_id)  # Fetch the Vault instance
+
+            # Update the target object
+            for attr, value in item_data.items():
                 if hasattr(target, attr):  # Ensure the attribute exists in the model
                     setattr(target, attr, value)
+            target.vault = vault  # Assign the Vault instance to the target
             target.save()
+        
         elif action_request.action == TeamVaultActionRequest.DELETE:
             # Delete the item
             action_request.target.delete()
