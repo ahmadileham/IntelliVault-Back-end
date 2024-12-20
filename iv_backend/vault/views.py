@@ -137,6 +137,10 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
                     {"error": f"Password encryption failed: {str(e)}"})
         return data
 
+    def decrypt_password(self, encrypted_password):
+        """Decrypt a single encrypted password."""
+        return aes.decrypt_login_password(encrypted_password)
+    
     def decrypt_passwords(self, serialized_data):
         """Decrypt passwords for a list of serialized data."""
         decrypted_data = []
