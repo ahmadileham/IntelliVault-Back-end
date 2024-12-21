@@ -60,6 +60,30 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return LoginInfo.objects.filter(vault__owner=self.request.user) | LoginInfo.objects.filter(vault__team__memberships__user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+
+        # Decrypt login passwords before sending response
+        decrypted_data = self.decrypt_passwords(serializer.data)
+        return Response(decrypted_data)
+    
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+
+        # Decrypt the login_password before sending the response
+        data = serializer.data
+        try:
+            data['decrypted_password'] = self.decrypt_password(data['login_password'])
+        except Exception as e:
+            raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+
+        # Remove the encrypted password from the response if desired
+        data.pop('login_password', None)
+
+        return Response(data)
+
     def create(self, request, *args, **kwargs):
         vault_id = request.data.get('vault')
         vault = get_object_or_404(Vault, id=vault_id)
@@ -172,13 +196,6 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
             raise ValidationError(
                 {"error": "You do not have permission to modify this vault."})
 
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-
-        # Decrypt login passwords before sending response
-        decrypted_data = self.decrypt_passwords(serializer.data)
-        return Response(decrypted_data)
 
 
 class FileViewSet(viewsets.ModelViewSet):
