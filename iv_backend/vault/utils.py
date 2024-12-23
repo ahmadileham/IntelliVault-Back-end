@@ -11,6 +11,7 @@ import base64
 import hvac
 import environ
 from django.urls import reverse
+from rest_framework.exceptions import ValidationError
 
 # Initialize environ and load conf.env file
 env = environ.Env()
@@ -138,18 +139,30 @@ def create_team_vault_action_request(action, user, vault, item_type, target=None
     """
     Handles CRUD operations for LoginInfo/File instances in team vaults by creating
     a pending TeamActionRequest.
-
-    :param action_type: One of "create", "update", "delete".
-    :param user: The user performing the action.
-    :param team: The team vault associated with the action.
-    :param item_type: The type of item being created/updated/deleted.
-    :param target: The target instance (for update/delete).
-    :param data: The data for creating or updating an instance.
     """
     if action not in ["create", "update", "delete"]:
         raise ValueError("Invalid action. Must be 'create', 'update', or 'delete'.")
 
-    # Create a TeamActionRequest
+    # Check for existing pending request for update or delete actions
+    if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] and target:
+        existing_request = TeamVaultActionRequest.objects.filter(
+            team_vault=vault,
+            action__in=[TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE],
+            status=TeamVaultActionRequest.PENDING,
+            item_type=item_type,
+            item_data__id=target.id  # Check for requests on the same instance
+        ).first()
+
+        if existing_request:
+            raise ValidationError(
+                {"error": f"A pending action request already exists for this instance."}
+            )
+
+    # Prepare `item_data`
+    if action == TeamVaultActionRequest.DELETE and target:
+        data = {"id": target.id}  # Only store the ID for DELETE
+
+    # Create a new TeamActionRequest
     action_request = TeamVaultActionRequest.objects.create(
         team_vault=vault,
         action=action,

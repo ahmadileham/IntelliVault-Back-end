@@ -16,6 +16,7 @@ from collaboration.models import Team, TeamMembership
 from django.core.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from django.utils import timezone
+from django.db.models import Q
 
 
 aes = AESEncryption()
@@ -58,7 +59,9 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return LoginInfo.objects.filter(vault__owner=self.request.user) | LoginInfo.objects.filter(vault__team__memberships__user=self.request.user)
+        return LoginInfo.objects.filter(
+            Q(vault__owner=self.request.user) | Q(vault__team__memberships__user=self.request.user)
+        ).distinct()
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -116,7 +119,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         
         return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
 
-    def delete(self, request, *args, **kwargs):
+    def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         vault = instance.vault
 
@@ -126,38 +129,43 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
             instance.delete()
             return Response({"detail": "Deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
 
+        print('cubaan delete')
         return self.handle_team_request(request, TeamVaultActionRequest.DELETE, vault, instance)
 
     def get_team_membership(self, user, team):
         return TeamMembership.objects.filter(user=user, team=team).first()
 
     def handle_team_request(self, request, action, vault, instance=None):
-        team_membership = self.get_team_membership(request.user, vault.team)
-        if not team_membership:
-            raise PermissionDenied("You are not a member of this team.")
+        try:
+            team_membership = self.get_team_membership(request.user, vault.team)
+            if not team_membership:
+                raise PermissionDenied("You are not a member of this team.")
 
-        # Encrypt the password if provided in the data
-        mutable_data = request.data.copy()
-        if action != TeamVaultActionRequest.DELETE:
-            mutable_data = self.encrypt_password(mutable_data)
+            # Encrypt the password if provided in the data
+            mutable_data = request.data.copy()
+            if action != TeamVaultActionRequest.DELETE:
+                mutable_data = self.encrypt_password(mutable_data)
 
-        # Add the instance ID to mutable_data for UPDATE and DELETE actions
-        if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE]:
-            if instance is None:
-                raise ValidationError(
-                    {"error": "Instance is required for UPDATE or DELETE actions."})
-            mutable_data['id'] = instance.id  # Append the instance ID
+            # Add the instance ID to mutable_data for UPDATE and DELETE actions
+            if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE]:
+                if instance is None:
+                    raise ValidationError(
+                        {"error": "Instance is required for UPDATE or DELETE actions."})
+                mutable_data['id'] = instance.id  # Append the instance ID
 
-        action_request = create_team_vault_action_request(
-            action,
-            request.user,
-            vault,
-            Item.LOGININFO,
-            target=instance if action in [
-                TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] else None,
-            data=mutable_data if action != TeamVaultActionRequest.DELETE else None
-        )
-        return Response({"detail": "Action request created.", "request_id": action_request.id}, status=status.HTTP_201_CREATED)
+            action_request = create_team_vault_action_request(
+                action,
+                request.user,
+                vault,
+                Item.LOGININFO,
+                target=instance if action in [
+                    TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] else None,
+                data=mutable_data if action != TeamVaultActionRequest.DELETE else None
+            )
+            return Response({"detail": "Action request created.", "request_id": action_request.id}, status=status.HTTP_201_CREATED)
+        
+        except ValidationError as e:
+            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
 
     def encrypt_password(self, data):
         """Encrypt the login password if it exists in the data."""
@@ -523,9 +531,18 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             target.vault = vault  # Assign the Vault instance to the target
             target.save()
         
-        elif action_request.action == TeamVaultActionRequest.DELETE:
-            # Delete the item
-            action_request.target.delete()
+        if action_request.action == TeamVaultActionRequest.DELETE:
+            # Extract the ID from `item_data` and delete the object
+            item_id = action_request.item_data.get("id")
+            if item_id:
+                if action_request.item_type == Item.LOGININFO:
+                    LoginInfo.objects.filter(id=item_id).delete()
+                elif action_request.item_type == Item.FILE:
+                    File.objects.filter(id=item_id).delete()
+                else:
+                    raise ValueError(f"Unsupported item type: {action_request.item_type}")
+            else:
+                raise ValueError("Item ID is missing in the action request data.")
 
         # Update request status
         action_request.status = TeamVaultActionRequest.APPROVED
