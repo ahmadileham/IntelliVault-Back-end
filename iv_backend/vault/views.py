@@ -260,7 +260,8 @@ class FileDownloadView(views.APIView):
     def get(self, request, file_id, share_link=None):
         file = get_object_or_404(File, id=file_id)
 
-        if file.vault.owner == request.user:
+        # Check if the file belongs to the authenticated user or the authenticated user is a member of the team associated with the vault
+        if file.vault.owner == request.user or TeamMembership.objects.filter(user=request.user, team=file.vault.team).exists():
             decrypted_content = aes.decrypt_file_content(file.file_content)
             return self._build_file_response(file, decrypted_content)
 
