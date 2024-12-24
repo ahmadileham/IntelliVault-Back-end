@@ -29,7 +29,7 @@ class VaultViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        
+
         return Vault.objects.filter(
             Q(owner=self.request.user) | Q(
                 team__memberships__user=self.request.user)
@@ -94,7 +94,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         if not vault.is_team_vault:
             self.validate_vault_ownership(vault_id, request.user)
             mutable_data = self.data_with_encrypted_password(
-                None,request.data.copy())
+                None, request.data.copy())
             serializer = self.get_serializer(data=mutable_data)
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
@@ -169,53 +169,78 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
                 {"error": "You do not have permission to modify this vault."})
 
 
-
-class FileViewSet(viewsets.ModelViewSet):
+class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
     serializer_class = FileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return File.objects.filter(vault__owner=self.request.user)
+        return File.objects.filter(
+            Q(vault__owner=self.request.user) | Q(
+                vault__team__memberships__user=self.request.user)
+        ).distinct()
 
     def create(self, request, *args, **kwargs):
-        # Validate and get the uploaded file
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        vault_id = request.data.get('vault')
+        vault = get_object_or_404(Vault, id=vault_id)
 
-        file_uploaded = request.FILES.get(
-            'file_uploaded')  # Get the uploaded file
-        vault_id = request.data['vault']
-        vault = Vault.objects.get(id=vault_id)
+        # For personal vaults, create directly
+        if not vault.is_team_vault:
+            # Validate and get the uploaded file
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-        if vault.is_team_vault:
-            # create action request
-            # return status 201, created action request to create
-            pass
+            file_uploaded = request.FILES.get(
+                'file_uploaded')  # Get the uploaded file
+            vault_id = request.data['vault']
 
-        # Check if the vault exists and belongs to the authenticated user
+            # Encrypt file content before saving
+            encrypted_content = aes.encrypt_file_content(
+                file_uploaded.read())
+
+            mime_type, _ = mimetypes.guess_type(file_uploaded.name)
+
+            # Create the file instance with encrypted content
+            file_instance = File.objects.create(
+                vault=vault,
+                file_name=file_uploaded.name,
+                file_content=encrypted_content,
+                mime_type=mime_type
+            )
+
+            # Serialize the created instance to return
+            response_serializer = self.get_serializer(file_instance)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+        return super().handle_team_request(request, TeamVaultActionRequest.CREATE, vault, process_data=self.process_file_data)
+
+
+    def process_file_data(self, request, mutable_data):
+        if 'file_uploaded' in request.FILES:
+            file_uploaded = request.FILES.get(
+                'file_uploaded')
+            encrypted_content = aes.encrypt_file_content(
+                file_uploaded.read())
+
+            # Add encrypted content to mutable data
+            mutable_data['file_content'] = encrypted_content
+
+            # Add other file metadata (if needed)
+            mutable_data['file_name'] = file_uploaded.name
+            mutable_data['mime_type'] = file_uploaded.content_type
+
+        # Ensure `file_uploaded` is removed to avoid serialization issues
+        if 'file_uploaded' in mutable_data:
+            del mutable_data['file_uploaded']
+
+        return mutable_data
+
+    def validate_vault_ownership(self, vault_id, user):
+        """Check if the vault belongs to the authenticated user."""
         try:
-            vault = Vault.objects.get(id=vault_id, owner=request.user)
+            return Vault.objects.get(id=vault_id, owner=user)
         except Vault.DoesNotExist:
-            return Response({'error': 'You do not have permission to add files to this vault.'},
-                            status=status.HTTP_403_FORBIDDEN)
-
-        # Encrypt file content before saving
-        encrypted_content = aes.encrypt_file_content(
-            file_uploaded.read())
-
-        mime_type, _ = mimetypes.guess_type(file_uploaded.name)
-
-        # Create the file instance with encrypted content
-        file_instance = File.objects.create(
-            vault=vault,
-            file_name=file_uploaded.name,
-            file_content=encrypted_content,
-            mime_type=mime_type
-        )
-
-        # Serialize the created instance to return
-        response_serializer = self.get_serializer(file_instance)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            raise ValidationError(
+                {"error": "You do not have permission to modify this vault."})
 
 
 class FileDownloadView(views.APIView):
@@ -442,14 +467,14 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             user=request.user, team=action_request.team_vault.team, role=TeamMembership.ADMIN
         ).exists():
             return Response({'detail': 'Only admins can approve requests.'}, status=status.HTTP_403_FORBIDDEN)
-        
+
         item_data = action_request.item_data
         if action_request.item_type == Item.LOGININFO:
-            model_fields = {field.name for field in LoginInfo._meta.get_fields()}
+            model_fields = {
+                field.name for field in LoginInfo._meta.get_fields()}
             filtered_item_data = {
                 key: value for key, value in item_data.items() if key in model_fields
             }
-            
 
             if action_request.action == TeamVaultActionRequest.CREATE:
                 vault_id = filtered_item_data.pop('vault')
@@ -472,6 +497,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             filtered_item_data = {
                 key: value for key, value in item_data.items() if key in model_fields
             }
+            
             vault_id = filtered_item_data.pop('vault')
             vault = get_object_or_404(Vault, id=vault_id)
             filtered_item_data['vault'] = vault
@@ -485,8 +511,6 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
                 target.save()
             elif action_request.action == TeamVaultActionRequest.DELETE:
                 File.objects.filter(id=item_data.get('id')).delete()
-
-        
 
         # Update request status
         action_request.status = TeamVaultActionRequest.APPROVED

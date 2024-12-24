@@ -13,24 +13,18 @@ class TeamRequestMixin:
         Allows specific views to customize how data is processed.
         """
         try:
-            # Check if the user is part of the team
-            team_membership = TeamMembership.objects.filter(
-                user=request.user, team=vault.team).first()
-            if not team_membership:
+            if not self.check_team_membership(request, vault):
                 raise PermissionDenied("You are not a member of this team.")
 
             mutable_data = request.data.copy()
 
+            # Process mutable data based on the action
+            mutable_data = self.process_mutable_data(
+                request, action, mutable_data, instance, process_data
+            )
+
             # Determine the item type based on the instance or mutable data
             item_type = self.get_item_type(action, instance, mutable_data)
-
-            # Allow the view to process data (e.g., encrypt file/password)
-            if action in [TeamVaultActionRequest.CREATE, TeamVaultActionRequest.UPDATE] and process_data and callable(process_data):
-                mutable_data = process_data(request, mutable_data)
-
-            # Include instance ID for updates and deletes
-            if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] and instance:
-                mutable_data['id'] = instance.id
 
             # Create the action request
             action_request = create_team_vault_action_request(
@@ -58,3 +52,17 @@ class TeamRequestMixin:
                 return Item.LOGININFO
             return Item.FILE
         return Item.FILE  # Default item type if neither instance nor mutable_data is available
+    
+    def process_mutable_data(self, request, action, mutable_data, instance, process_data):
+        """Process mutable data if a processing function is provided."""
+        if action in [TeamVaultActionRequest.CREATE, TeamVaultActionRequest.UPDATE] and process_data and callable(process_data):
+            mutable_data = process_data(request, mutable_data)
+        if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] and instance:
+            mutable_data['id'] = instance.id
+        return mutable_data
+    
+    def check_team_membership(self, request, vault):
+        """Check if the user is a member of the team associated with the vault."""
+        return TeamMembership.objects.filter(user=request.user, team=vault.team).exists()
+    
+
