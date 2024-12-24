@@ -274,7 +274,7 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         except Vault.DoesNotExist:
             raise ValidationError(
                 {"error": "You do not have permission to modify this vault."})
-
+    
 
 class FileDownloadView(views.APIView):
     permission_classes = [permissions.AllowAny]
