@@ -275,81 +275,138 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
             raise ValidationError(
                 {"error": "You do not have permission to modify this vault."})
 
+    @action(detail=True, methods=['get'], url_path='download', permission_classes=[permissions.AllowAny])
+    def download_file(self, request, pk=None):
+        file = self.get_object()
 
-class FileDownloadView(views.APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request, file_id, share_link=None):
-        file = get_object_or_404(File, id=file_id)
-
-        # Check if the file belongs to the authenticated user or the authenticated user is a member of the team associated with the vault
+        # Check if the file belongs to the authenticated user or team member
         if file.vault.owner == request.user or TeamMembership.objects.filter(user=request.user, team=file.vault.team).exists():
             decrypted_content = aes.decrypt_file_content(file.file_content)
             return self._build_file_response(file, decrypted_content)
 
-        # If a shared link is provided, validate it
+        # Check shared link access
+        share_link = request.query_params.get('share_link')
         if share_link:
-            # Check if the link is valid for either SharedItem or SharedVault
-            shared_resource = self._validate_shared_resource(
-                request, share_link, file)
+            shared_resource = self._validate_shared_resource(request, share_link, file)
 
-            if shared_resource is None:
+            if not shared_resource:
                 return Response({'error': 'Invalid or expired shared link'}, status=status.HTTP_403_FORBIDDEN)
 
-            # If valid, proceed to decrypt and download the file
             decrypted_content = aes.decrypt_file_content(file.file_content)
             return self._build_file_response(file, decrypted_content)
 
-        # If neither condition passes, deny access
         return Response({'error': 'Unauthorized access'}, status=status.HTTP_403_FORBIDDEN)
 
     def _validate_shared_resource(self, request, share_link, file):
-        # Attempt to retrieve either a SharedItem or SharedVault
         for resource_model in (SharedItem, SharedVault):
             try:
                 if resource_model == SharedItem:
-
                     file_content_type = ContentType.objects.get_for_model(File)
-
                     shared_resource = resource_model.objects.get(
                         share_link=share_link,
                         content_type=file_content_type,
                         object_id=file.id
                     )
-
-                    # Validate the access password
                     password = request.query_params.get('password')
                     if not password or not check_password(password, shared_resource.access_password):
-                        return None  # Invalid access password
+                        return None
                 else:
                     shared_resource = resource_model.objects.get(
                         share_link=share_link
                     )
 
-                # Check if the shared resource has expired
                 if shared_resource.has_expired():
-                    return None  # Link has expired
+                    return None
 
-                # If valid, return the shared resource
                 return shared_resource
-
             except resource_model.DoesNotExist:
-                continue  # Try the next resource model if not found
-
+                continue
         return None
 
     def _build_file_response(self, file, decrypted_content):
-        random_string = ''.join(random.choices(
-            string.ascii_letters + string.digits, k=5))
-
-        # Append random string to the filename
+        random_string = ''.join(random.choices(string.ascii_letters + string.digits, k=5))
         file_name, file_extension = file.file_name.rsplit('.', 1)
         new_file_name = f"{file_name}-{random_string}.{file_extension}"
 
-        # Construct the response with decrypted file content and MIME type
         response = HttpResponse(decrypted_content, content_type=file.mime_type)
         response['Content-Disposition'] = f'attachment; filename="{new_file_name}"'
         return response
+
+class FileDownloadView(views.APIView):
+    pass
+    # permission_classes = [permissions.AllowAny]
+
+    # def get(self, request, file_id, share_link=None):
+    #     file = get_object_or_404(File, id=file_id)
+
+    #     # Check if the file belongs to the authenticated user or the authenticated user is a member of the team associated with the vault
+    #     if file.vault.owner == request.user or TeamMembership.objects.filter(user=request.user, team=file.vault.team).exists():
+    #         decrypted_content = aes.decrypt_file_content(file.file_content)
+    #         return self._build_file_response(file, decrypted_content)
+
+    #     # If a shared link is provided, validate it
+    #     if share_link:
+    #         # Check if the link is valid for either SharedItem or SharedVault
+    #         shared_resource = self._validate_shared_resource(
+    #             request, share_link, file)
+
+    #         if shared_resource is None:
+    #             return Response({'error': 'Invalid or expired shared link'}, status=status.HTTP_403_FORBIDDEN)
+
+    #         # If valid, proceed to decrypt and download the file
+    #         decrypted_content = aes.decrypt_file_content(file.file_content)
+    #         return self._build_file_response(file, decrypted_content)
+
+    #     # If neither condition passes, deny access
+    #     return Response({'error': 'Unauthorized access'}, status=status.HTTP_403_FORBIDDEN)
+
+    # def _validate_shared_resource(self, request, share_link, file):
+    #     # Attempt to retrieve either a SharedItem or SharedVault
+    #     for resource_model in (SharedItem, SharedVault):
+    #         try:
+    #             if resource_model == SharedItem:
+
+    #                 file_content_type = ContentType.objects.get_for_model(File)
+
+    #                 shared_resource = resource_model.objects.get(
+    #                     share_link=share_link,
+    #                     content_type=file_content_type,
+    #                     object_id=file.id
+    #                 )
+
+    #                 # Validate the access password
+    #                 password = request.query_params.get('password')
+    #                 if not password or not check_password(password, shared_resource.access_password):
+    #                     return None  # Invalid access password
+    #             else:
+    #                 shared_resource = resource_model.objects.get(
+    #                     share_link=share_link
+    #                 )
+
+    #             # Check if the shared resource has expired
+    #             if shared_resource.has_expired():
+    #                 return None  # Link has expired
+
+    #             # If valid, return the shared resource
+    #             return shared_resource
+
+    #         except resource_model.DoesNotExist:
+    #             continue  # Try the next resource model if not found
+
+    #     return None
+
+    # def _build_file_response(self, file, decrypted_content):
+    #     random_string = ''.join(random.choices(
+    #         string.ascii_letters + string.digits, k=5))
+
+    #     # Append random string to the filename
+    #     file_name, file_extension = file.file_name.rsplit('.', 1)
+    #     new_file_name = f"{file_name}-{random_string}.{file_extension}"
+
+    #     # Construct the response with decrypted file content and MIME type
+    #     response = HttpResponse(decrypted_content, content_type=file.mime_type)
+    #     response['Content-Disposition'] = f'attachment; filename="{new_file_name}"'
+    #     return response
 
 
 # Sharing views
