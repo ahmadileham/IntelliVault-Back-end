@@ -442,75 +442,51 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             user=request.user, team=action_request.team_vault.team, role=TeamMembership.ADMIN
         ).exists():
             return Response({'detail': 'Only admins can approve requests.'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Perform the requested action
-        if action_request.action == TeamVaultActionRequest.CREATE:
-            # Create the item
-            item_data = action_request.item_data
-
-            # Remove any fields that are not part of the model
-            model_fields = {
-                field.name for field in LoginInfo._meta.get_fields()}
+        
+        item_data = action_request.item_data
+        if action_request.item_type == Item.LOGININFO:
+            model_fields = {field.name for field in LoginInfo._meta.get_fields()}
             filtered_item_data = {
-                key: value for key, value in item_data.items() if key in model_fields}
+                key: value for key, value in item_data.items() if key in model_fields
+            }
+            
 
-            # Convert the vault ID to a Vault instance
-            # Remove 'vault' from item_data
-            vault_id = filtered_item_data.pop('vault')
-            # Fetch the Vault instance
-            vault = get_object_or_404(Vault, id=vault_id)
-
-            if action_request.item_type == Item.LOGININFO:
-                # Add the Vault instance to item_data
+            if action_request.action == TeamVaultActionRequest.CREATE:
+                vault_id = filtered_item_data.pop('vault')
+                vault = get_object_or_404(Vault, id=vault_id)
                 filtered_item_data['vault'] = vault
                 LoginInfo.objects.create(**filtered_item_data)
-            elif action_request.item_type == Item.FILE:
-                # Add the Vault instance to item_data
+            elif action_request.action == TeamVaultActionRequest.UPDATE:
+                vault_id = filtered_item_data.pop('vault')
+                vault = get_object_or_404(Vault, id=vault_id)
                 filtered_item_data['vault'] = vault
-                File.objects.create(**filtered_item_data)
-
-        elif action_request.action == TeamVaultActionRequest.UPDATE:
-            # Update the item
-            item_data = action_request.item_data
-
-            # Ensure the `id` is included in item_data
-            if 'id' not in item_data:
-                return Response({'detail': 'Missing "id" in item_data for update action.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Dynamically fetch the target object based on item_type
-            if action_request.item_type == Item.LOGININFO:
                 target = get_object_or_404(LoginInfo, id=item_data.get('id'))
-            elif action_request.item_type == Item.FILE:
-                target = get_object_or_404(File, id=item_data.get('id'))
-            else:
-                return Response({'detail': 'Invalid item type.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Convert the vault ID to a Vault instance
-            vault_id = item_data.pop('vault')  # Remove 'vault' from item_data
-            # Fetch the Vault instance
-            vault = get_object_or_404(Vault, id=vault_id)
-
-            # Update the target object
-            for attr, value in item_data.items():
-                if hasattr(target, attr):  # Ensure the attribute exists in the model
+                for attr, value in filtered_item_data.items():
                     setattr(target, attr, value)
-            target.vault = vault  # Assign the Vault instance to the target
-            target.save()
+                target.save()
+            elif action_request.action == TeamVaultActionRequest.DELETE:
+                LoginInfo.objects.filter(id=item_data.get('id')).delete()
 
-        if action_request.action == TeamVaultActionRequest.DELETE:
-            # Extract the ID from `item_data` and delete the object
-            item_id = action_request.item_data.get("id")
-            if item_id:
-                if action_request.item_type == Item.LOGININFO:
-                    LoginInfo.objects.filter(id=item_id).delete()
-                elif action_request.item_type == Item.FILE:
-                    File.objects.filter(id=item_id).delete()
-                else:
-                    raise ValueError(
-                        f"Unsupported item type: {action_request.item_type}")
-            else:
-                raise ValueError(
-                    "Item ID is missing in the action request data.")
+        elif action_request.item_type == Item.FILE:
+            model_fields = {field.name for field in File._meta.get_fields()}
+            filtered_item_data = {
+                key: value for key, value in item_data.items() if key in model_fields
+            }
+            vault_id = filtered_item_data.pop('vault')
+            vault = get_object_or_404(Vault, id=vault_id)
+            filtered_item_data['vault'] = vault
+
+            if action_request.action == TeamVaultActionRequest.CREATE:
+                File.objects.create(**filtered_item_data)
+            elif action_request.action == TeamVaultActionRequest.UPDATE:
+                target = get_object_or_404(File, id=item_data.get('id'))
+                for attr, value in filtered_item_data.items():
+                    setattr(target, attr, value)
+                target.save()
+            elif action_request.action == TeamVaultActionRequest.DELETE:
+                File.objects.filter(id=item_data.get('id')).delete()
+
+        
 
         # Update request status
         action_request.status = TeamVaultActionRequest.APPROVED
