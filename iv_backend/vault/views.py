@@ -17,6 +17,8 @@ from django.core.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from django.utils import timezone
 from django.db.models import Q
+from .mixins import TeamRequestMixin
+import base64
 
 
 aes = AESEncryption()
@@ -27,17 +29,11 @@ class VaultViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Get vaults that belong to the request user or are part of a team where the user is a member
-        user = self.request.user
-
-        # Vaults where the user is the owner
-        user_vaults = Vault.objects.filter(owner=user)
-
-        # Vaults that belong to teams where the user is a member
-        team_vaults = Vault.objects.filter(team__memberships__user=user)
-
-        # Combine the two querysets, ensuring no duplicates
-        return user_vaults | team_vaults
+        
+        return Vault.objects.filter(
+            Q(owner=self.request.user) | Q(
+                team__memberships__user=self.request.user)
+        ).distinct()
 
     def perform_create(self, serializer):
         team_id = self.request.data.get('team')
@@ -54,13 +50,14 @@ class VaultViewSet(viewsets.ModelViewSet):
             serializer.save(owner=self.request.user)
 
 
-class LoginInfoViewSet(viewsets.ModelViewSet):
+class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
     serializer_class = LoginInfoSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return LoginInfo.objects.filter(
-            Q(vault__owner=self.request.user) | Q(vault__team__memberships__user=self.request.user)
+            Q(vault__owner=self.request.user) | Q(
+                vault__team__memberships__user=self.request.user)
         ).distinct()
 
     def list(self, request, *args, **kwargs):
@@ -70,7 +67,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         # Decrypt login passwords before sending response
         decrypted_data = self.decrypt_passwords(serializer.data)
         return Response(decrypted_data)
-    
+
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
@@ -78,9 +75,11 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         # Decrypt the login_password before sending the response
         data = serializer.data
         try:
-            data['decrypted_password'] = self.decrypt_password(data['login_password'])
+            data['decrypted_password'] = aes.decrypt_login_password(
+                data['login_password'])
         except Exception as e:
-            raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+            raise ValidationError(
+                {"error": f"Password decryption failed: {str(e)}"})
 
         # Remove the encrypted password from the response if desired
         data.pop('login_password', None)
@@ -94,13 +93,14 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         # For personal vaults, create directly
         if not vault.is_team_vault:
             self.validate_vault_ownership(vault_id, request.user)
-            mutable_data = self.encrypt_password(request.data.copy())
+            mutable_data = self.data_with_encrypted_password(
+                None,request.data.copy())
             serializer = self.get_serializer(data=mutable_data)
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        return self.handle_team_request(request, TeamVaultActionRequest.CREATE, vault)
+        return super().handle_team_request(request, TeamVaultActionRequest.CREATE, vault, process_data=self.data_with_encrypted_password)
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -109,15 +109,15 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
         # For personal vaults, update directly
         if not vault.is_team_vault:
             self.validate_vault_ownership(vault.id, request.user)
-            mutable_data = self.encrypt_password(request.data.copy())
+            mutable_data = self.data_with_encrypted_password(
+                None, request.data.copy())
             serializer = self.get_serializer(
                 instance, data=mutable_data, partial=True)
             serializer.is_valid(raise_exception=True)
             self.perform_update(serializer)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
-        
-        return self.handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance)
+        return super().handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance, process_data=self.data_with_encrypted_password)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -129,46 +129,14 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
             instance.delete()
             return Response({"detail": "Deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
 
-        print('cubaan delete')
-        return self.handle_team_request(request, TeamVaultActionRequest.DELETE, vault, instance)
+        return super().handle_team_request(request, TeamVaultActionRequest.DELETE, vault, instance)
 
     def get_team_membership(self, user, team):
         return TeamMembership.objects.filter(user=user, team=team).first()
 
-    def handle_team_request(self, request, action, vault, instance=None):
-        try:
-            team_membership = self.get_team_membership(request.user, vault.team)
-            if not team_membership:
-                raise PermissionDenied("You are not a member of this team.")
-
-            # Encrypt the password if provided in the data
-            mutable_data = request.data.copy()
-            if action != TeamVaultActionRequest.DELETE:
-                mutable_data = self.encrypt_password(mutable_data)
-
-            # Add the instance ID to mutable_data for UPDATE and DELETE actions
-            if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE]:
-                if instance is None:
-                    raise ValidationError(
-                        {"error": "Instance is required for UPDATE or DELETE actions."})
-                mutable_data['id'] = instance.id  # Append the instance ID
-
-            action_request = create_team_vault_action_request(
-                action,
-                request.user,
-                vault,
-                Item.LOGININFO,
-                target=instance if action in [
-                    TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] else None,
-                data=mutable_data if action != TeamVaultActionRequest.DELETE else None
-            )
-            return Response({"detail": "Action request created.", "request_id": action_request.id}, status=status.HTTP_201_CREATED)
-        
-        except ValidationError as e:
-            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
-
-    def encrypt_password(self, data):
-        """Encrypt the login password if it exists in the data."""
+    def data_with_encrypted_password(self, request, data):
+        """Encrypt the login password and return the updated data.
+        The request parameter is there because FileViewSet also uses this method."""
         if 'login_password' in data and data['login_password']:
             try:
                 data['login_password'] = aes.encrypt_login_password(
@@ -178,10 +146,6 @@ class LoginInfoViewSet(viewsets.ModelViewSet):
                     {"error": f"Password encryption failed: {str(e)}"})
         return data
 
-    def decrypt_password(self, encrypted_password):
-        """Decrypt a single encrypted password."""
-        return aes.decrypt_login_password(encrypted_password)
-    
     def decrypt_passwords(self, serialized_data):
         """Decrypt passwords for a list of serialized data."""
         decrypted_data = []
@@ -523,7 +487,8 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
 
             # Convert the vault ID to a Vault instance
             vault_id = item_data.pop('vault')  # Remove 'vault' from item_data
-            vault = get_object_or_404(Vault, id=vault_id)  # Fetch the Vault instance
+            # Fetch the Vault instance
+            vault = get_object_or_404(Vault, id=vault_id)
 
             # Update the target object
             for attr, value in item_data.items():
@@ -531,7 +496,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
                     setattr(target, attr, value)
             target.vault = vault  # Assign the Vault instance to the target
             target.save()
-        
+
         if action_request.action == TeamVaultActionRequest.DELETE:
             # Extract the ID from `item_data` and delete the object
             item_id = action_request.item_data.get("id")
@@ -541,9 +506,11 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
                 elif action_request.item_type == Item.FILE:
                     File.objects.filter(id=item_id).delete()
                 else:
-                    raise ValueError(f"Unsupported item type: {action_request.item_type}")
+                    raise ValueError(
+                        f"Unsupported item type: {action_request.item_type}")
             else:
-                raise ValueError("Item ID is missing in the action request data.")
+                raise ValueError(
+                    "Item ID is missing in the action request data.")
 
         # Update request status
         action_request.status = TeamVaultActionRequest.APPROVED
