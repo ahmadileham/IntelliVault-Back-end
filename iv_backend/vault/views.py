@@ -213,18 +213,51 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
 
         return super().handle_team_request(request, TeamVaultActionRequest.CREATE, vault, process_data=self.process_file_data)
 
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        vault = instance.vault
+
+        # For personal vaults, update directly
+        if not vault.is_team_vault:
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+
+        # For team vaults, create an action request
+        return super().handle_team_request(
+            request, TeamVaultActionRequest.UPDATE, vault, instance=instance, process_data=self.process_file_data
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        vault = instance.vault
+
+        # For personal vaults, delete directly
+        if not vault.is_team_vault:
+            instance.delete()
+            return Response({"detail": "File deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+        # For team vaults, create an action request
+        return super().handle_team_request(
+            request, TeamVaultActionRequest.DELETE, vault, instance=instance
+        )
 
     def process_file_data(self, request, mutable_data):
         if 'file_uploaded' in request.FILES:
             file_uploaded = request.FILES.get(
                 'file_uploaded')
+
+            # Encrypt the file content and pass the encoded content to make it json serializable
             encrypted_content = aes.encrypt_file_content(
                 file_uploaded.read())
+            encoded_content = base64.b64encode(
+                encrypted_content).decode('utf-8')
 
-            # Add encrypted content to mutable data
-            mutable_data['file_content'] = encrypted_content
-
-            # Add other file metadata (if needed)
+            # Update the mutable data with the encoded content
+            mutable_data['file_content'] = encoded_content
             mutable_data['file_name'] = file_uploaded.name
             mutable_data['mime_type'] = file_uploaded.content_type
 
@@ -497,14 +530,21 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             filtered_item_data = {
                 key: value for key, value in item_data.items() if key in model_fields
             }
-            
-            vault_id = filtered_item_data.pop('vault')
-            vault = get_object_or_404(Vault, id=vault_id)
-            filtered_item_data['vault'] = vault
+
+            # Decode the base64-encoded file content back to binary
+            if "file_content" in filtered_item_data:
+                filtered_item_data["file_content"] = base64.b64decode(
+                    filtered_item_data["file_content"])
 
             if action_request.action == TeamVaultActionRequest.CREATE:
+                vault_id = filtered_item_data.pop('vault')
+                vault = get_object_or_404(Vault, id=vault_id)
+                filtered_item_data['vault'] = vault
                 File.objects.create(**filtered_item_data)
             elif action_request.action == TeamVaultActionRequest.UPDATE:
+                vault_id = filtered_item_data.pop('vault')
+                vault = get_object_or_404(Vault, id=vault_id)
+                filtered_item_data['vault'] = vault
                 target = get_object_or_404(File, id=item_data.get('id'))
                 for attr, value in filtered_item_data.items():
                     setattr(target, attr, value)
