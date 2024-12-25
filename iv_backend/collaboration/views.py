@@ -8,7 +8,10 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
-
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.decorators import action
+from vault.models import Vault
+from vault.serializers import VaultSerializer
 
 class TeamViewSet(viewsets.ModelViewSet):
     serializer_class = TeamSerializer
@@ -25,6 +28,39 @@ class TeamViewSet(viewsets.ModelViewSet):
         # Create a TeamMembership instance for the creator with the role of admin
         TeamMembership.objects.create(
             user=self.request.user, team=team, role='admin')
+        
+    @action(detail=False, methods=['get'])
+    def my_teams(self, request):
+        memberships = TeamMembership.objects.filter(user=request.user)
+        teams = [membership.team for membership in memberships]
+        serializer = self.get_serializer(teams, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def members(self, request, pk=None):
+        # Check if the user is a member of the team
+        team = get_object_or_404(Team, pk=pk)
+        if not TeamMembership.objects.filter(user=request.user, team=team).exists():
+            return Response({"detail": "You are not a member of this team."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Retrieve all members of the team
+        memberships = TeamMembership.objects.filter(team=team)
+        serializer = TeamMembershipSerializer(memberships, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='vaults', permission_classes=[IsAuthenticated])
+    def get_team_vaults(self, request, pk=None):
+        # Ensure the team exists
+        team = get_object_or_404(Team, pk=pk)
+
+        # Check if the user is a member of the team
+        if not TeamMembership.objects.filter(user=request.user, team=team).exists():
+            return Response({"detail": "You are not a member of this team."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Retrieve all vaults associated with the team
+        vaults = Vault.objects.filter(team=team)
+        serializer = VaultSerializer(vaults, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class TeamMembershipViewSet(viewsets.ModelViewSet):
@@ -38,6 +74,15 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Set the user as the authenticated user when creating a team membership
         serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        membership = self.get_object()
+
+        # Ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
+            raise PermissionDenied("Only team admins can modify roles.")
+        
+        serializer.save()
 
 
 class CreateInvitationView(APIView):

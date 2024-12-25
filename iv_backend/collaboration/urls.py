@@ -8,7 +8,7 @@ router.register(r'team-membership', TeamMembershipViewSet, basename='team-member
 
 urlpatterns = [
     path('api/', include(router.urls)),
-    path('teams/<int:team_id>/invite/', CreateInvitationView.as_view(), name='create-invitation'),
+    path('team/<int:team_id>/invite/', CreateInvitationView.as_view(), name='create-invitation'),
     path('invitations/<int:invitation_id>/respond/', RespondInvitationView.as_view(), name='respond-invitation'),
     path('invitations/', InvitationListView.as_view(), name='invitation-list'),
 ]
