@@ -139,6 +139,11 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
             self.perform_update(serializer)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
+        # Validate the vault ID
+        validation_response = self.validate_vault_id(request, vault)
+        if validation_response:
+            return validation_response
+
         return super().handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance, process_data=self.data_with_encrypted_password)
 
     def destroy(self, request, *args, **kwargs):
@@ -247,6 +252,11 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
             serializer.is_valid(raise_exception=True)
             serializer.save()
             return Response(serializer.data)
+
+        # Validate the vault ID
+        validation_response = self.validate_vault_id(request, vault)
+        if validation_response:
+            return validation_response
 
         # For team vaults, create an action request
         return super().handle_team_request(

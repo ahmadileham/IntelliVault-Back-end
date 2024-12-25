@@ -7,6 +7,22 @@ from rest_framework.response import Response
 
 
 class TeamRequestMixin:
+
+    def validate_vault_id(self, request, vault):
+        """
+        Validate that the vault ID in the request data matches the current vault's ID.
+        Prevents changing the vault for items in a team vault.
+        """
+        if 'vault' in request.data:
+            try:
+                request_vault_id = int(request.data['vault'])
+            except (ValueError, TypeError):
+                return Response({"error": "Invalid vault ID format."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if request_vault_id != vault.id:
+                return Response({"error": "Cannot change the vault for items in a team vault."}, status=status.HTTP_400_BAD_REQUEST)
+        return None
+
     def handle_team_request(self, request, action, vault, instance=None, process_data=None):
         """
         Handles team requests for creating, updating, or deleting an item in a team vault.
@@ -52,7 +68,7 @@ class TeamRequestMixin:
                 return Item.LOGININFO
             return Item.FILE
         return Item.FILE  # Default item type if neither instance nor mutable_data is available
-    
+
     def process_mutable_data(self, request, action, mutable_data, instance, process_data):
         """Process mutable data if a processing function is provided."""
         if action in [TeamVaultActionRequest.CREATE, TeamVaultActionRequest.UPDATE] and process_data and callable(process_data):
@@ -60,9 +76,7 @@ class TeamRequestMixin:
         if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] and instance:
             mutable_data['id'] = instance.id
         return mutable_data
-    
+
     def check_team_membership(self, request, vault):
         """Check if the user is a member of the team associated with the vault."""
         return TeamMembership.objects.filter(user=request.user, team=vault.team).exists()
-    
-
