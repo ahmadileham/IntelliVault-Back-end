@@ -515,6 +515,10 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
 
+        # Ensure the request is pending
+        if action_request.status != TeamVaultActionRequest.PENDING:
+            return Response({'detail': 'Request has already been processed.'}, status=status.HTTP_400_BAD_REQUEST)
+
         # Ensure the user is an admin
         if not TeamMembership.objects.filter(
             user=request.user, team=action_request.team_vault.team, role=TeamMembership.ADMIN
@@ -583,6 +587,10 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
         action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
+
+        # Ensure the request is pending
+        if action_request.status != TeamVaultActionRequest.PENDING:
+            return Response({'detail': 'Request has already been processed.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Ensure the user is an admin
         if not TeamMembership.objects.filter(
