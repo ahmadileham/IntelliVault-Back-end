@@ -48,7 +48,7 @@ class VaultViewSet(viewsets.ModelViewSet):
             serializer.save(owner=self.request.user, team=team)
         else:
             serializer.save(owner=self.request.user)
-    
+
     def perform_update(self, serializer):
         instance = self.get_object()
 
@@ -56,7 +56,8 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied("Only team admins can update team vaults.")
+                raise PermissionDenied(
+                    "Only team admins can update team vaults.")
 
         serializer.save()
 
@@ -65,7 +66,8 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied("Only team admins can delete team vaults.")
+                raise PermissionDenied(
+                    "Only team admins can delete team vaults.")
 
         instance.delete()
 
@@ -294,7 +296,7 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         except Vault.DoesNotExist:
             raise ValidationError(
                 {"error": "You do not have permission to modify this vault."})
-    
+
 
 class FileDownloadView(views.APIView):
     permission_classes = [permissions.AllowAny]
@@ -513,97 +515,88 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
-        action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
+        action_request = self._get_and_validate_action_request(pk)
+        self._ensure_user_is_admin(
+            action_request.team_vault.team, request.user)
 
-        # Ensure the request is pending
-        if action_request.status != TeamVaultActionRequest.PENDING:
-            return Response({'detail': 'Request has already been processed.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Ensure the user is an admin
-        if not TeamMembership.objects.filter(
-            user=request.user, team=action_request.team_vault.team, role=TeamMembership.ADMIN
-        ).exists():
-            return Response({'detail': 'Only admins can approve requests.'}, status=status.HTTP_403_FORBIDDEN)
-
-        item_data = action_request.item_data
         if action_request.item_type == Item.LOGININFO:
-            model_fields = {
-                field.name for field in LoginInfo._meta.get_fields()}
-            filtered_item_data = {
-                key: value for key, value in item_data.items() if key in model_fields
-            }
-
-            if action_request.action == TeamVaultActionRequest.CREATE:
-                vault_id = filtered_item_data.pop('vault')
-                vault = get_object_or_404(Vault, id=vault_id)
-                filtered_item_data['vault'] = vault
-                LoginInfo.objects.create(**filtered_item_data)
-            elif action_request.action == TeamVaultActionRequest.UPDATE:
-                vault_id = filtered_item_data.pop('vault')
-                vault = get_object_or_404(Vault, id=vault_id)
-                filtered_item_data['vault'] = vault
-                target = get_object_or_404(LoginInfo, id=item_data.get('id'))
-                for attr, value in filtered_item_data.items():
-                    setattr(target, attr, value)
-                target.save()
-            elif action_request.action == TeamVaultActionRequest.DELETE:
-                LoginInfo.objects.filter(id=item_data.get('id')).delete()
-
+            self._handle_login_info_action(action_request)
         elif action_request.item_type == Item.FILE:
-            model_fields = {field.name for field in File._meta.get_fields()}
-            filtered_item_data = {
-                key: value for key, value in item_data.items() if key in model_fields
-            }
+            self._handle_file_action(action_request)
 
-            # Decode the base64-encoded file content back to binary
-            if "file_content" in filtered_item_data:
-                filtered_item_data["file_content"] = base64.b64decode(
-                    filtered_item_data["file_content"])
-
-            if action_request.action == TeamVaultActionRequest.CREATE:
-                vault_id = filtered_item_data.pop('vault')
-                vault = get_object_or_404(Vault, id=vault_id)
-                filtered_item_data['vault'] = vault
-                File.objects.create(**filtered_item_data)
-            elif action_request.action == TeamVaultActionRequest.UPDATE:
-                vault_id = filtered_item_data.pop('vault')
-                vault = get_object_or_404(Vault, id=vault_id)
-                filtered_item_data['vault'] = vault
-                target = get_object_or_404(File, id=item_data.get('id'))
-                for attr, value in filtered_item_data.items():
-                    setattr(target, attr, value)
-                target.save()
-            elif action_request.action == TeamVaultActionRequest.DELETE:
-                File.objects.filter(id=item_data.get('id')).delete()
-
-        # Update request status
-        action_request.status = TeamVaultActionRequest.APPROVED
-        action_request.authorized_by = request.user
-        action_request.authorized_at = timezone.now()
-        action_request.save()
-
+        self._update_request_status(
+            action_request, TeamVaultActionRequest.APPROVED, request.user)
         return Response({"detail": "Request approved successfully."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
-        action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
+        action_request = self._get_and_validate_action_request(pk)
+        self._ensure_user_is_admin(
+            action_request.team_vault.team, request.user)
 
-        # Ensure the request is pending
-        if action_request.status != TeamVaultActionRequest.PENDING:
-            return Response({'detail': 'Request has already been processed.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Ensure the user is an admin
-        if not TeamMembership.objects.filter(
-            user=request.user, team=action_request.team_vault.team, role=TeamMembership.ADMIN
-        ).exists():
-            return Response({'detail': 'Only admins can reject requests.'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Update request status
-        action_request.status = TeamVaultActionRequest.REJECTED
-        action_request.authorized_by = request.user
-        action_request.save()
-
+        self._update_request_status(
+            action_request, TeamVaultActionRequest.REJECTED, request.user)
         return Response({"detail": "Request rejected successfully."}, status=status.HTTP_200_OK)
+
+    def _get_and_validate_action_request(self, pk):
+        action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
+        if action_request.status != TeamVaultActionRequest.PENDING:
+            raise Response({'detail': 'Request has already been processed.'},
+                           status=status.HTTP_400_BAD_REQUEST)
+        return action_request
+
+    def _ensure_user_is_admin(self, team, user):
+        if not TeamMembership.objects.filter(user=user, team=team, role=TeamMembership.ADMIN).exists():
+            raise Response(
+                {'detail': 'Only admins can process requests.'}, status=status.HTTP_403_FORBIDDEN)
+
+    def _handle_login_info_action(self, action_request):
+        item_data = self._filter_item_data(action_request.item_data, LoginInfo)
+
+        if action_request.action == TeamVaultActionRequest.CREATE:
+            vault = self._get_vault(item_data.pop('vault'))
+            LoginInfo.objects.create(vault=vault, **item_data)
+        elif action_request.action == TeamVaultActionRequest.UPDATE:
+            vault = self._get_vault(item_data.pop('vault'))
+            target = get_object_or_404(LoginInfo, id=item_data.get('id'))
+            self._update_model_instance(target, item_data)
+        elif action_request.action == TeamVaultActionRequest.DELETE:
+            LoginInfo.objects.filter(id=item_data.get('id')).delete()
+
+    def _handle_file_action(self, action_request):
+        item_data = self._filter_item_data(action_request.item_data, File)
+        if "file_content" in item_data:
+            item_data["file_content"] = base64.b64decode(
+                item_data["file_content"])
+
+        if action_request.action == TeamVaultActionRequest.CREATE:
+            vault = self._get_vault(item_data.pop('vault'))
+            File.objects.create(vault=vault, **item_data)
+        elif action_request.action == TeamVaultActionRequest.UPDATE:
+            vault = self._get_vault(item_data.pop('vault'))
+            target = get_object_or_404(File, id=item_data.get('id'))
+            self._update_model_instance(target, item_data)
+        elif action_request.action == TeamVaultActionRequest.DELETE:
+            File.objects.filter(id=item_data.get('id')).delete()
+
+    def _filter_item_data(self, item_data, model):
+        model_fields = {field.name for field in model._meta.get_fields()}
+        return {key: value for key, value in item_data.items() if key in model_fields}
+
+    def _get_vault(self, vault_id):
+        return get_object_or_404(Vault, id=vault_id)
+
+    def _update_model_instance(self, instance, data):
+        for attr, value in data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+    def _update_request_status(self, action_request, status, user):
+        action_request.status = status
+        action_request.authorized_by = user
+        if status == TeamVaultActionRequest.APPROVED:
+            action_request.authorized_at = timezone.now()
+        action_request.save()
 
 
 class VaultItemsView(views.APIView):
