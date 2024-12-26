@@ -1,6 +1,6 @@
 from django.contrib.auth.hashers import make_password
 from datetime import timedelta
-from .models import SharedItem, SharedVault, LoginInfo, File
+from .models import SharedItem, SharedVault, LoginInfo, File, TeamVaultActionRequest
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -11,6 +11,7 @@ import base64
 import hvac
 import environ
 from django.urls import reverse
+from rest_framework.exceptions import ValidationError
 
 # Initialize environ and load conf.env file
 env = environ.Env()
@@ -147,3 +148,43 @@ def unpack_shared_item(item, share_link=None, request=None):
             "file_download_link": file_download_link,  # Return the download link
         }
     return None
+
+def create_team_vault_action_request(action, user, vault, item_type, target=None, data=None):
+    """
+    Handles CRUD operations for LoginInfo/File instances in team vaults by creating
+    a pending TeamActionRequest.
+    """
+    if action not in ["create", "update", "delete"]:
+        raise ValueError("Invalid action. Must be 'create', 'update', or 'delete'.")
+
+    # Check for existing pending request for update or delete actions
+    if action in [TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE] and target:
+        existing_request = TeamVaultActionRequest.objects.filter(
+            team_vault=vault,
+            action__in=[TeamVaultActionRequest.UPDATE, TeamVaultActionRequest.DELETE],
+            status=TeamVaultActionRequest.PENDING,
+            item_type=item_type,
+            item_data__id=target.id  # Check for requests on the same instance
+        ).first()
+
+        if existing_request:
+            raise ValidationError(
+                {"error": f"A pending action request already exists for this instance."}
+            )
+
+    # Prepare `item_data`
+    if action == TeamVaultActionRequest.DELETE and target:
+        data = {"id": target.id}  # Only store the ID for DELETE
+
+    # Create a new TeamActionRequest
+    action_request = TeamVaultActionRequest.objects.create(
+        team_vault=vault,
+        action=action,
+        status=TeamVaultActionRequest.PENDING,
+        requester=user,
+        item_type=item_type,
+        item_data=data,
+        created_at=timezone.now(),
+    )
+
+    return action_request

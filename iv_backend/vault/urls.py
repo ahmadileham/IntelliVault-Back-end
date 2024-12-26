@@ -10,7 +10,9 @@ from .views import (
     AccessSharedVaultView,
     FileDownloadView,
     AIView,
-    AnotherAIView
+    AnotherAIView,
+     VaultItemsView,
+     TeamVaultActionRequestViewSet
 )
 
 
@@ -18,6 +20,7 @@ router = DefaultRouter()
 router.register(r'vault', VaultViewSet, basename='vault')
 router.register(r'logininfo', LoginInfoViewSet, basename='login-info')
 router.register(r'file', FileViewSet, basename='file')
+router.register(r'team-vault-action-request', TeamVaultActionRequestViewSet, basename='team-vault-action-request')
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -43,4 +46,5 @@ urlpatterns = [
     path('access/vault/<str:share_link>/',
          AccessSharedVaultView.as_view(), name='access-shared-vault'),
 
+     path('<int:vault_id>/items/', VaultItemsView.as_view(), name='vault-items'),
 ]
