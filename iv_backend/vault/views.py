@@ -42,8 +42,7 @@ class VaultViewSet(viewsets.ModelViewSet):
 
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can create vaults for the team.")
+                return Response({'error': 'Only team admins can create team vaults.'}, status=status.HTTP_403_FORBIDDEN)
 
             serializer.save(owner=self.request.user, team=team)
         else:
@@ -56,8 +55,10 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can update team vaults.")
+                return Response({'error': 'Only team admins can update team vaults.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        if instance.owner != self.request.user:
+            return Response({'error': 'You do not have permission to modify this vault.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer.save()
 
@@ -66,8 +67,10 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can delete team vaults.")
+                return Response({'error': 'Only team admins can delete team vaults.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if instance.owner != self.request.user:
+            return Response({'error': 'You do not have permission to modify this vault.'}, status=status.HTTP_403_FORBIDDEN)
 
         instance.delete()
 
