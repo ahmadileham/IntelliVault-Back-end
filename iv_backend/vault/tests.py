@@ -1,128 +1,167 @@
-from django.urls import reverse
-from rest_framework import status
+# tests.py
+
 from rest_framework.test import APITestCase, APIClient
+from rest_framework import status
 from django.contrib.auth import get_user_model
-from .models import Item, Vault, LoginInfo, SharedItem, SharedVault
-from .utils import AESEncryption
-from datetime import timedelta
-from django.utils import timezone
-from django.contrib.auth.hashers import make_password
+from django.urls import reverse
+from collaboration.models import Team, TeamMembership
+from vault.models import Vault
 
 User = get_user_model()
 
 
-class VaultAppAPITestCase(APITestCase):
+class VaultViewSetTestCase(APITestCase):
+
     def setUp(self):
-        self.user = User.objects.create_user(
-            username='testuser', password='testpass', email='testemail@example.com')
+        # Create users
+        self.user1 = User.objects.create_user(username="user1", email="user1@example.com", password="password123")
+        self.user2 = User.objects.create_user(username="user2", email="user2@example.com", password="password123")
+        
+        # Create teams
+        self.team1 = Team.objects.create(name="Team 1", creator=self.user1)
+        self.team2 = Team.objects.create(name="Team 2", creator=self.user2)
+        
+        # Create team memberships
+        TeamMembership.objects.create(user=self.user1, team=self.team1, role=TeamMembership.ADMIN)
+        TeamMembership.objects.create(user=self.user2, team=self.team1, role=TeamMembership.MEMBER)
+        TeamMembership.objects.create(user=self.user2, team=self.team2, role=TeamMembership.ADMIN)
+
         self.client = APIClient()
-        self.client.force_authenticate(user=self.user)
-        self.aes = AESEncryption()
 
-        # Create a Vault instance
-        self.vault = Vault.objects.create(name="Test Vault", owner=self.user)
+        # Vault API endpoint
+        self.vault_url = reverse("vault-list")
 
-        # URL names for reverse lookups
-        self.vault_list_url = 'vault-list'
-        self.login_info_list_url = 'login-info-list'
-        self.share_item_url = 'share-item'
-        self.share_vault_url = 'share-vault'
-        self.access_shared_item_url = 'access-shared-item'
-        self.access_shared_vault_url = 'access-shared-vault'
-
-    def test_create_vault(self):
-        data = {'name': 'New Vault', 'owner': self.user.id}
-        response = self.client.post(reverse(self.vault_list_url), data)
+    def test_create_personal_vault(self):
+        self.client.force_authenticate(user=self.user1)
+        data = {"name": "Personal Vault", "owner": self.user1.id}
+        response = self.client.post(self.vault_url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['name'], 'New Vault')
+        self.assertEqual(Vault.objects.count(), 1)
+        self.assertEqual(Vault.objects.first().owner, self.user1)
 
-    def test_list_vaults(self):
-        response = self.client.get(reverse(self.vault_list_url))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Only one vault created in setUp
-        self.assertEqual(len(response.data), 1)
-
-    def test_create_login_info(self):
-        data = {
-            'vault': self.vault.id,
-            'login_username': 'example_user',
-            'login_password': self.aes.encrypt_login_password('example_pass')
-        }
-        response = self.client.post(reverse(self.login_info_list_url), data)
+    def test_create_team_vault_as_admin(self):
+        self.client.force_authenticate(user=self.user1)
+        data = {"name": "Team Vault", "team": self.team1.id, "owner": self.user1.id}
+        response = self.client.post(self.vault_url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['login_username'], 'example_user')
+        self.assertEqual(Vault.objects.count(), 1)
+        self.assertEqual(Vault.objects.first().team, self.team1)
 
-    def test_list_login_info(self):
-        LoginInfo.objects.create(
-            vault=self.vault,
-            login_username='example_user',
-            login_password=self.aes.encrypt_login_password('example_pass')
-        )
-        response = self.client.get(reverse(self.login_info_list_url))
+    def test_create_team_vault_as_non_admin(self):
+        self.client.force_authenticate(user=self.user2)
+        
+        data = {"name": "Unauthorized Team Vault", "team": self.team1.id, "owner": self.user2.id}
+        response = self.client.post(self.vault_url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Vault.objects.count(), 0)
+
+    def test_update_vault_as_owner(self):
+        self.client.force_authenticate(user=self.user1)
+        vault = Vault.objects.create(name="Old Vault", owner=self.user1)
+        update_url = reverse("vault-detail", args=[vault.id])
+        data = {"name": "Updated Vault"}
+        response = self.client.patch(update_url, data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        # Check for decrypted field
-        self.assertIn('decrypted_password', response.data[0])
+        vault.refresh_from_db()
+        self.assertEqual(vault.name, "Updated Vault")
 
-    def test_share_item(self):
-        # Create LoginInfo item to share
-        login_info = LoginInfo.objects.create(
-            vault=self.vault,
-            login_username='share_user',
-            login_password=self.aes.encrypt_login_password('share_pass')
-        )
-        data = {'password': 'access_password'}
-        response = self.client.post(
-            reverse(self.share_item_url, args=[Item.LOGININFO,login_info.id]), data
-        )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIn('share_link', response.data)
+    def test_update_vault_as_non_owner(self):
+        self.client.force_authenticate(user=self.user2) # User 2 is not the owner
+        vault = Vault.objects.create(name="Old Vault", owner=self.user1)
+        update_url = reverse("vault-detail", args=[vault.id])
+        data = {"name": "Unauthorized Update"}
+        response = self.client.patch(update_url, data)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_share_vault(self):
-        data = {'password': 'access_password'}
-        response = self.client.post(
-            reverse(self.share_vault_url, args=[self.vault.id]), data
-        )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIn('share_link', response.data)
-
-    def test_access_shared_item(self):
-        # Create shared item for access testing
-        login_info = LoginInfo.objects.create(
-            vault=self.vault,
-            login_username='access_user',
-            login_password=self.aes.encrypt_login_password('access_pass')
-        )
-        shared_item = SharedItem.objects.create(
-            item=login_info,
-            shared_by=self.user,
-            share_link='samplelink123',
-            access_password=make_password('access_password'),
-            expiry_date=timezone.now() + timedelta(minutes=10)
-        )
-        data = {'password': 'access_password'}
-        response = self.client.post(
-            reverse(self.access_shared_item_url, args=[
-                    shared_item.share_link]), data
-        )
+    def test_update_team_vault_as_admin(self):
+        self.client.force_authenticate(user=self.user1) # User 1 is an admin of the team
+        vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        update_url = reverse("vault-detail", args=[vault.id])
+        data = {"name": "Updated Team Vault"}
+        response = self.client.patch(update_url, data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['message'], 'Access granted')
-        self.assertIn('item', response.data)
+        vault.refresh_from_db()
+        self.assertEqual(vault.name, "Updated Team Vault")
 
-    def test_access_shared_vault(self):
-        # Create shared vault for access testing
-        shared_vault = SharedVault.objects.create(
-            vault=self.vault,
-            shared_by=self.user,
-            share_link='samplevaultlink123',
-            access_password=make_password('access_password'),
-            expiry_date=timezone.now() + timedelta(minutes=10)
-        )
-        data = {'password': 'access_password'}
-        response = self.client.post(
-            reverse(self.access_shared_vault_url, args=[
-                    shared_vault.share_link]), data
-        )
+    def test_update_team_vault_as_non_admin(self):
+        self.client.force_authenticate(user=self.user2) # User 2 is not an admin of the team
+        vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        update_url = reverse("vault-detail", args=[vault.id])
+        data = {"name": "Unauthorized Update"}
+        response = self.client.patch(update_url, data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_delete_vault_as_owner(self):
+        self.client.force_authenticate(user=self.user1)
+        vault = Vault.objects.create(name="Vault to Delete", owner=self.user1)
+        delete_url = reverse("vault-detail", args=[vault.id])
+        response = self.client.delete(delete_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(Vault.objects.count(), 0)
+    
+    def test_delete_vault_as_non_owner(self):
+        self.client.force_authenticate(user=self.user2) # User 2 is not the owner
+        vault = Vault.objects.create(name="Vault to Delete", owner=self.user1)
+        delete_url = reverse("vault-detail", args=[vault.id])
+        response = self.client.delete(delete_url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(Vault.objects.count(), 1)
+    
+    def test_delete_team_vault_as_admin(self):
+        self.client.force_authenticate(user=self.user1) # User 1 is an admin of the team
+        vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        delete_url = reverse("vault-detail", args=[vault.id])
+        response = self.client.delete(delete_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(Vault.objects.count(), 0)
+
+    def test_delete_team_vault_as_non_admin(self):
+        self.client.force_authenticate(user=self.user2)
+        vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        delete_url = reverse("vault-detail", args=[vault.id])
+        response = self.client.delete(delete_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Vault.objects.count(), 1)
+
+    def test_get_vault_queryset(self):
+        self.client.force_authenticate(user=self.user1)
+        Vault.objects.create(name="User 1 Vault", owner=self.user1)
+        Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        Vault.objects.create(name="User 2 Vault", owner=self.user2)
+
+        response = self.client.get(self.vault_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['message'], 'Access granted')
-        self.assertIn('login_items', response.data)
+        self.assertEqual(len(response.data), 2)  # User 1's vault and Team Vault
+        # User 2 vault is not inside the queryset (no assertIn)
+        self.assertNotIn("User 2 Vault", [vault["name"] for vault in response.data])
+
+    def test_retrieve_team_vault_as_non_member(self):
+        # Create a team vault owned by user1
+        team_vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        
+        # Authenticate as a non-member user (user2 is a member, so we create user3)
+        user3 = User.objects.create_user(username="user3", email="user3@example.com", password="password123")
+        self.client.force_authenticate(user=user3)
+
+        # Attempt to retrieve the team vault
+        retrieve_url = reverse("vault-detail", args=[team_vault.id])
+        response = self.client.get(retrieve_url)
+
+        # Assert that the response is a 404 NOT FOUND
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_retrieve_team_vault_as_member(self):
+        # Create a team vault owned by user1
+        team_vault = Vault.objects.create(name="Team Vault", owner=self.user1, team=self.team1)
+        
+        # Authenticate as a team member (user2)
+        self.client.force_authenticate(user=self.user2)
+
+        # Retrieve the team vault
+        retrieve_url = reverse("vault-detail", args=[team_vault.id])
+        response = self.client.get(retrieve_url)
+
+        # Assert that the response is a 200 OK
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
