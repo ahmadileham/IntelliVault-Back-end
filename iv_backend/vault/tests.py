@@ -1645,3 +1645,102 @@ class VaultItemsTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['login_items'], [])
         self.assertEqual(response.data['file_items'], [])
+
+    def test_cannot_change_vault_of_team_vault_item(self):
+        # Create a team vault
+        team = Team.objects.create(name="Test Team", creator=self.user)
+        TeamMembership.objects.create(user=self.user, team=team, role=TeamMembership.ADMIN)
+        team_vault = Vault.objects.create(owner=self.user, name="Team Vault", team=team)
+
+        # Create a LoginInfo in the team vault
+        login_info = LoginInfo.objects.create(
+            vault=team_vault,
+            login_username="test_user",
+            login_password=aes.encrypt_login_password("test_password")
+        )
+
+        # Try to change the vault of the LoginInfo that belongs to a team vault
+        url = reverse('login-info-detail', args=[login_info.id])
+        data = {
+            'vault': self.vault.id  # Attempt to move to personal vault
+        }
+
+        self.client.force_authenticate(user=self.user)
+
+        # Send PUT request to update
+        response = self.client.patch(url, data, format='json')
+
+        # Assert that it raises a validation error
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], "Cannot change the vault of items belonging to a team vault.")
+        
+        # Create file for team vault
+        file = File.objects.create(
+            vault=team_vault,
+            file_name="test_file.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        # Try to change the vault of the File that belongs to a team vault
+        url = reverse('file-detail', args=[file.id])
+        data = {
+            'vault': self.vault.id  # Attempt to move to personal vault
+        }
+        response = self.client.patch(url, data, format='json')
+
+        # Assert that it raises a validation error
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], "Cannot change the vault of items belonging to a team vault.")
+
+    def test_cannot_move_personal_vault_item_to_team_vault(self):
+        # Create a team vault
+        team = Team.objects.create(name="Test Team", creator=self.user)
+        TeamMembership.objects.create(user=self.user, team=team, role=TeamMembership.ADMIN)
+        team_vault = Vault.objects.create(owner=self.user, name="Team Vault", team=team)
+
+        # Create a LoginInfo in the personal vault
+        login_info_personal_vault = LoginInfo.objects.create(
+            vault=self.vault,
+            login_username="test_user",
+            login_password=aes.encrypt_login_password("test_password")
+        )
+
+        # Try to change the vault of the LoginInfo that belongs to a personal vault to a team vault
+        url = reverse('login-info-detail', args=[login_info_personal_vault.id])
+        data = {
+            'vault': team_vault.id  # Attempt to move to team vault
+        }
+
+        self.client.force_authenticate(user=self.user)
+
+        # Send PUT request to update
+        response = self.client.patch(url, data, format='json')
+
+        # Assert that it raises a validation error
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], "Cannot move personal vault items to a team vault.")
+
+        # Create file for personal vault
+        file_personal_vault = File.objects.create(
+            vault=self.vault,
+            file_name="test_file.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        # Try to change the vault of the File that belongs to a personal vault to a team vault
+        url = reverse('file-detail', args=[file_personal_vault.id])
+        data = {
+            'vault': team_vault.id  # Attempt to move to team vault
+        }
+        response = self.client.patch(url, data, format='json')
+
+        # Assert that it raises a validation error
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], "Cannot move personal vault items to a team vault.")
+        

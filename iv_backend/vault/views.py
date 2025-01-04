@@ -2,7 +2,7 @@ from django.forms import ValidationError
 from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
-from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item, create_team_vault_action_request
+from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer, TeamVaultActionRequestSerializer
 from .models import Vault, Item, LoginInfo, File, SharedVault, SharedItem, TeamVaultActionRequest
 from django.urls import reverse
@@ -17,7 +17,7 @@ from django.core.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from django.utils import timezone
 from django.db.models import Q
-from .mixins import TeamRequestMixin
+from .mixins import TeamRequestMixin, VaultItemValidationMixin
 import base64
 
 
@@ -75,7 +75,7 @@ class VaultViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
+class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin, VaultItemValidationMixin):
     serializer_class = LoginInfoSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -133,6 +133,10 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         vault = instance.vault
+        new_vault_id = request.data.get('vault')
+
+        # Validate vault change
+        self.validate_vault_change(instance.vault, new_vault_id)
 
         # For personal vaults, update directly
         if not vault.is_team_vault:
@@ -208,7 +212,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
                 {"error": "You do not have permission to modify this vault."})
 
 
-class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
+class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin, VaultItemValidationMixin):
     serializer_class = FileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -256,6 +260,10 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         vault = instance.vault
+        new_vault_id = request.data.get('vault')
+
+        # Validate vault change
+        self.validate_vault_change(instance.vault, new_vault_id)
 
         # For personal vaults, update directly
         if not vault.is_team_vault:
@@ -418,6 +426,9 @@ class ShareItemView(views.APIView):
             elif item_type == Item.FILE:
                 item = File.objects.get(id=item_id)
 
+            if item.vault.is_team_vault:
+                raise PermissionDenied('Team vault items cannot be shared.')
+
             # Create shared item with the identified type and password
             shared_item = create_share_item(item, request.user, password)
 
@@ -445,6 +456,9 @@ class ShareVaultView(views.APIView):
 
         try:
             vault = Vault.objects.get(id=vault_id)
+
+            if vault.is_team_vault:
+                raise PermissionDenied('Team vaults cannot be shared.')
 
             # Create shared vault with the provided password
             shared_vault = create_share_vault(vault, request.user, password)
