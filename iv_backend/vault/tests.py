@@ -11,6 +11,9 @@ from .utils import AESEncryption
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils.timezone import now, timedelta
 from django.contrib.contenttypes.models import ContentType
+from io import BytesIO
+from django.contrib.auth.hashers import make_password
+
 
 
 User = get_user_model()
@@ -1349,10 +1352,12 @@ class FileTests(TestCase):
         # Check if the file instance is not deleted
         self.assertEqual(File.objects.count(), 1)
 
+
 class FileDownloadTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.user = User.objects.create_user(username="testuser", password="testpass", email="user@example.com")
+        self.user = User.objects.create_user(
+            username="testuser", password="testpass", email="user@example.com")
         self.vault = Vault.objects.create(name="Test Vault", owner=self.user)
 
         # Use SimpleUploadedFile to create the file
@@ -1369,7 +1374,7 @@ class FileDownloadTests(TestCase):
         self.share_link = "validsharelink"
         self.shared_item = SharedItem.objects.create(
             share_link=self.share_link,
-            access_password="hashedpassword",
+            access_password=make_password("hashedpassword"),
             shared_by=self.user,
             expiry_date=now() + timedelta(days=1),
             content_type=ContentType.objects.get_for_model(File),
@@ -1378,17 +1383,124 @@ class FileDownloadTests(TestCase):
 
     def test_authenticated_file_download(self):
         self.client.force_authenticate(user=self.user)
-        response = self.client.get(reverse("file-download", args=[self.file.id]))
+        response = self.client.get(
+            reverse("file-download", args=[self.file.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_file_download_with_valid_share_link(self):
-        response = self.client.get(reverse("file-download-shared", args=[self.file.id, self.share_link]))
+        response = self.client.get(
+            reverse("file-download-shared", args=[self.file.id, self.share_link]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_file_download_with_invalid_share_link(self):
-        response = self.client.get(reverse("file-download-shared", args=[self.file.id, "invalidlink"]))
+        response = self.client.get(
+            reverse("file-download-shared", args=[self.file.id, "invalidlink"]))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_unauthorized_file_download(self):
-        response = self.client.get(reverse("file-download", args=[self.file.id]))
+        response = self.client.get(
+            reverse("file-download", args=[self.file.id]))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class SharingTests(TestCase):
+    def setUp(self):
+        # Create a test user
+        self.user = User.objects.create_user(username='testuser', password='testpassword', email="p@e.com")
+        self.client = APIClient()
+        self.client.login(username='testuser', password='testpassword')
+
+        # Create a test vault
+        self.vault = Vault.objects.create(owner=self.user, name="Test Vault")
+
+        # Create a test LoginInfo
+        self.login_info = LoginInfo.objects.create(
+            vault=self.vault,
+            login_username="test_username",
+            login_password=aes.encrypt_login_password("test_password")
+        )
+
+        # Create a test file
+        file_content = BytesIO(b"Test file content")
+        encrypted_content = aes.encrypt_file_content(file_content.read())
+        self.file = File.objects.create(
+            vault=self.vault,
+            file_name="test_file.txt",
+            file_content=encrypted_content,
+            mime_type="text/plain"
+        )
+
+    def test_create_shared_item(self):
+        """Test creating a shared item (LoginInfo and File) with a password."""
+        for item_type, item_id in [('logininfo', self.login_info.id), ('file', self.file.id)]:
+            response = self.client.post(
+                reverse('share-item', args=[item_type, item_id]),
+                data={'password': 'test_share_password'},
+                format='json'
+            )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+            self.assertIn('share_link', response.data)
+            self.assertIn('item_type', response.data)
+            self.assertEqual(response.data['item_type'], item_type)
+
+    def test_access_shared_item(self):
+        """Test accessing a shared item using the correct password."""
+        shared_item = SharedItem.objects.create(
+            item=self.login_info,
+            shared_by=self.user,
+            share_link="testshare123",
+            access_password=make_password("correct_password"),
+            expiry_date="2099-01-01"
+        )
+        response = self.client.post(
+            reverse('access-shared-item', args=[shared_item.share_link]),
+            data={'password': 'correct_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('item', response.data)
+
+    def test_access_shared_item_wrong_password(self):
+        """Test accessing a shared item using the wrong password."""
+        shared_item = SharedItem.objects.create(
+            item=self.login_info,
+            shared_by=self.user,
+            share_link="testshare123",
+            access_password=make_password("correct_password"),
+            expiry_date="2099-01-01"
+        )
+        response = self.client.post(
+            reverse('access-shared-item', args=[shared_item.share_link]),
+            data={'password': 'wrong_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('error', response.data)
+
+    def test_create_shared_vault(self):
+        """Test creating a shared vault."""
+        response = self.client.post(
+            reverse('share-vault', args=[self.vault.id]),
+            data={'password': 'test_vault_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('share_link', response.data)
+
+    def test_access_shared_vault(self):
+        """Test accessing a shared vault."""
+        shared_vault = SharedVault.objects.create(
+            vault=self.vault,
+            shared_by=self.user,
+            share_link="vaultshare123",
+            access_password=make_password("correct_vault_password"),
+            expiry_date="2099-01-01"
+        )
+        response = self.client.post(
+            reverse('access-shared-vault', args=[shared_vault.share_link]),
+            data={'password': 'correct_vault_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('login_items', response.data)
+        self.assertIn('file_items', response.data)
