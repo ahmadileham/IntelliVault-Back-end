@@ -13,6 +13,7 @@ from django.utils.timezone import now, timedelta
 from django.contrib.contenttypes.models import ContentType
 from io import BytesIO
 from django.contrib.auth.hashers import make_password
+from .serializers import LoginInfoSerializer, FileSerializer
 
 
 
@@ -1504,3 +1505,83 @@ class SharingTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('login_items', response.data)
         self.assertIn('file_items', response.data)
+
+class VaultItemsTests(TestCase):
+    def setUp(self):
+        # Create test users
+        self.user = User.objects.create_user(username='testuser', password='testpassword', email="e@e.com")
+        self.other_user = User.objects.create_user(username='otheruser', password='otherpassword', email="f@f.com")
+
+        # Create test client and authenticate
+        self.client = APIClient()
+        self.client.login(username='testuser', password='testpassword')
+        self.other_client = APIClient()
+        self.other_client.login(username='otheruser', password='otherpassword')
+
+        # Create a test vault
+        self.vault = Vault.objects.create(owner=self.user, name="Test Vault")
+
+        # Create another user's vault
+        self.other_vault = Vault.objects.create(owner=self.other_user, name="Other Vault")
+
+        # Create a test team and add users
+        self.team = Team.objects.create(name="Test Team", creator=self.user)
+        TeamMembership.objects.create(user=self.user, team=self.team, role=TeamMembership.ADMIN)
+        self.team_vault = Vault.objects.create(owner=self.user, name="Team Vault", team=self.team)
+
+        # Add items to the test vault
+        self.login_info = LoginInfo.objects.create(
+            vault=self.vault,
+            login_username="test_user",
+            login_password=aes.encrypt_login_password("test_password")
+        )
+        file_content = BytesIO(b"Test file content")
+        encrypted_content = aes.encrypt_file_content(file_content.read())
+        self.file = File.objects.create(
+            vault=self.vault,
+            file_name="test_file.txt",
+            file_content=encrypted_content,
+            mime_type="text/plain"
+        )
+
+    def test_get_vault_items_success(self):
+        """Test retrieving items from a vault the user owns."""
+        response = self.client.get(reverse('vault-items', args=[self.vault.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verify the data in the response
+        login_data = LoginInfoSerializer(self.login_info).data
+        file_data = FileSerializer(self.file).data
+        self.assertIn('login_items', response.data)
+        self.assertIn('file_items', response.data)
+        self.assertIn(login_data, response.data['login_items'])
+        self.assertIn(file_data, response.data['file_items'])
+
+    def test_get_vault_items_no_permission(self):
+        """Test retrieving items from a vault the user does not own and is not part of the team."""
+        response = self.client.get(reverse('vault-items', args=[self.other_vault.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.other_client.get(reverse('vault-items', args=[self.team_vault.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_get_vault_items_team_access(self):
+        """Test retrieving items from a team vault where the user has access."""
+        response = self.client.get(reverse('vault-items', args=[self.team_vault.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('login_items', response.data)
+        self.assertIn('file_items', response.data)
+
+    def test_get_vault_items_vault_not_found(self):
+        """Test retrieving items from a non-existent vault."""
+        response = self.client.get(reverse('vault-items', args=[9999]))  # Non-existent vault ID
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn('error', response.data)
+
+    def test_get_vault_items_empty_vault(self):
+        """Test retrieving items from an empty vault."""
+        empty_vault = Vault.objects.create(owner=self.user, name="Empty Vault")
+        response = self.client.get(reverse('vault-items', args=[empty_vault.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['login_items'], [])
+        self.assertEqual(response.data['file_items'], [])

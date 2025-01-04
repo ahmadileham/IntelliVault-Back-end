@@ -634,7 +634,7 @@ class VaultItemsView(views.APIView):
 
             # Check if the user has access to the vault
             if not self.has_access_to_vault(request.user, vault):
-                return Response({'error': 'You do not have permission to access this vault.'}, status=status.HTTP_403_FORBIDDEN)
+                raise PermissionDenied('You do not have access to this vault.')
 
             # Retrieve all LoginInfo and File items for the vault
             login_items = LoginInfo.objects.filter(vault=vault)
