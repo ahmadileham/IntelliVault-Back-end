@@ -192,25 +192,34 @@ class VaultViewSetTestCase(APITestCase):
 class LoginInfoTests(TestCase):
     def setUp(self):
         # Create users with emails
-        self.user1 = User.objects.create_user(username='user1', password='password1', email='user1@example.com')
-        self.user2 = User.objects.create_user(username='user2', password='password2', email='user2@example.com')
-        self.user3 = User.objects.create_user(username='user3', password='password3', email='user3@example.com')  # No access user
+        self.user1 = User.objects.create_user(
+            username='user1', password='password1', email='user1@example.com')
+        self.user2 = User.objects.create_user(
+            username='user2', password='password2', email='user2@example.com')
+        self.user3 = User.objects.create_user(
+            username='user3', password='password3', email='user3@example.com')  # No access user
 
         # Create personal vaults
-        self.personal_vault_user1 = Vault.objects.create(owner=self.user1, name="User1 Personal Vault")
-        self.personal_vault_user2 = Vault.objects.create(owner=self.user2, name="User2 Personal Vault")
+        self.personal_vault_user1 = Vault.objects.create(
+            owner=self.user1, name="User1 Personal Vault")
+        self.personal_vault_user2 = Vault.objects.create(
+            owner=self.user2, name="User2 Personal Vault")
 
         # Create a team and team vault
         self.team = Team.objects.create(name="Team1", creator=self.user1)
-        self.team_vault = Vault.objects.create(owner=self.user1, team=self.team, name="Team Vault")
+        self.team_vault = Vault.objects.create(
+            owner=self.user1, team=self.team, name="Team Vault")
 
         # Add memberships
-        TeamMembership.objects.create(user=self.user1, team=self.team, role=TeamMembership.ADMIN)
-        TeamMembership.objects.create(user=self.user2, team=self.team, role=TeamMembership.MEMBER)
+        TeamMembership.objects.create(
+            user=self.user1, team=self.team, role=TeamMembership.ADMIN)
+        TeamMembership.objects.create(
+            user=self.user2, team=self.team, role=TeamMembership.MEMBER)
 
         # Set up API client
         self.client = APIClient()
-        self.client.login(username='user1', password='password1')  # Default login as user1
+        # Default login as user1
+        self.client.login(username='user1', password='password1')
 
     def test_create_logininfo_personal_vault(self):
         url = reverse('login-info-list')
@@ -222,16 +231,18 @@ class LoginInfoTests(TestCase):
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(LoginInfo.objects.count(), 1)
-        self.assertEqual(LoginInfo.objects.first().vault, self.personal_vault_user1)
+        self.assertEqual(LoginInfo.objects.first().vault,
+                         self.personal_vault_user1)
 
     def test_update_logininfo_personal_vault(self):
         login_info = LoginInfo.objects.create(
-            vault=self.personal_vault_user1, 
-            login_username="old_user", 
+            vault=self.personal_vault_user1,
+            login_username="old_user",
             login_password="old_password"
         )
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_user", "login_password": "updated_password"}
+        data = {"login_username": "updated_user",
+                "login_password": "updated_password"}
         response = self.client.put(url, data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         login_info.refresh_from_db()
@@ -239,8 +250,8 @@ class LoginInfoTests(TestCase):
 
     def test_delete_logininfo_personal_vault(self):
         login_info = LoginInfo.objects.create(
-            vault=self.personal_vault_user1, 
-            login_username="test_user", 
+            vault=self.personal_vault_user1,
+            login_username="test_user",
             login_password="test_password"
         )
         url = reverse('login-info-detail', args=[login_info.id])
@@ -255,7 +266,8 @@ class LoginInfoTests(TestCase):
             login_username="unauthorized_user",
             login_password="unauthorized_password"
         )
-        self.client.login(username='user2', password='password2')  # Login as user2 (no access)
+        # Login as user2 (no access)
+        self.client.login(username='user2', password='password2')
         url = reverse('login-info-detail', args=[login_info.id])
 
         # Attempt to access the LoginInfo
@@ -297,15 +309,15 @@ class LoginInfoTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
 
-
     def test_update_logininfo_team_vault(self):
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_team_user", "login_password": "updated_team_password"}
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
         response = self.client.put(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
@@ -315,21 +327,22 @@ class LoginInfoTests(TestCase):
 
     def test_update_logininfo_team_vault_as_non_member(self):
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
         self.client.login(username='user3', password='password3')
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "unauthorized_team_user", "login_password": "unauthorized_team_password"}
+        data = {"login_username": "unauthorized_team_user",
+                "login_password": "unauthorized_team_password"}
         response = self.client.put(url, data)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
 
     def test_delete_logininfo_team_vault(self):
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="delete_team_user", 
+            vault=self.team_vault,
+            login_username="delete_team_user",
             login_password="delete_team_password"
         )
         url = reverse('login-info-detail', args=[login_info.id])
@@ -342,8 +355,8 @@ class LoginInfoTests(TestCase):
 
     def test_delete_logininfo_team_vault_as_non_member(self):
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="delete_team_user", 
+            vault=self.team_vault,
+            login_username="delete_team_user",
             login_password="delete_team_password"
         )
         self.client.login(username='user3', password='password3')
@@ -370,11 +383,13 @@ class LoginInfoTests(TestCase):
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-approve', args=[action_request.id])
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
         response = self.client.post(url)  # Admin approves the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.APPROVED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
 
         # Check if the logininfo instance is created
         self.assertEqual(LoginInfo.objects.count(), 1)
@@ -400,35 +415,40 @@ class LoginInfoTests(TestCase):
         action_request = TeamVaultActionRequest.objects.first()
 
         self.client.force_authenticate(user=self.user2)
-        url = reverse('team-vault-action-request-approve', args=[action_request.id])
-        response = self.client.post(url)  # Non-admin tries to approve the request
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        # Non-admin tries to approve the request
+        response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         action_request.refresh_from_db()
         self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
 
         # Check if the logininfo instance is not created
         self.assertEqual(LoginInfo.objects.count(), 0)
-    
+
     def test_admin_approve_team_vault_action_request_update(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
 
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_team_user", "login_password": "updated_team_password"}
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
         response = self.client.patch(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-approve', args=[action_request.id])
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
         response = self.client.post(url)  # Admin approves the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.APPROVED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
 
         # Check if the logininfo instance is updated
         login_info.refresh_from_db()
@@ -437,21 +457,24 @@ class LoginInfoTests(TestCase):
     def test_non_admin_approve_team_vault_action_request_update(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
 
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_team_user", "login_password": "updated_team_password"}
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
         response = self.client.patch(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
         self.client.force_authenticate(user=self.user2)
-        url = reverse('team-vault-action-request-approve', args=[action_request.id])
-        response = self.client.post(url)  # Non-admin tries to approve the request
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        # Non-admin tries to approve the request
+        response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         action_request.refresh_from_db()
         self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
@@ -463,8 +486,8 @@ class LoginInfoTests(TestCase):
     def test_admin_approve_team_vault_action_request_delete(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="delete_team_user", 
+            vault=self.team_vault,
+            login_username="delete_team_user",
             login_password="delete_team_password"
         )
 
@@ -474,11 +497,13 @@ class LoginInfoTests(TestCase):
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-approve', args=[action_request.id])
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
         response = self.client.post(url)  # Admin approves the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.APPROVED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
 
         # Check if the logininfo instance is deleted
         self.assertEqual(LoginInfo.objects.count(), 0)
@@ -501,11 +526,13 @@ class LoginInfoTests(TestCase):
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
         response = self.client.post(url)  # Admin rejects the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.REJECTED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
 
         # Check if the logininfo instance is not created
         self.assertEqual(LoginInfo.objects.count(), 0)
@@ -529,8 +556,10 @@ class LoginInfoTests(TestCase):
         action_request = TeamVaultActionRequest.objects.first()
 
         self.client.force_authenticate(user=self.user2)
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
-        response = self.client.post(url)  # Non-admin tries to reject the request
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         action_request.refresh_from_db()
         self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
@@ -541,23 +570,26 @@ class LoginInfoTests(TestCase):
     def test_admin_reject_team_vault_action_request_update(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
 
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_team_user", "login_password": "updated_team_password"}
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
         response = self.client.patch(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
-        response = self.client.post(url) # Admin rejects the request
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin rejects the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.REJECTED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
 
         # Check if the logininfo instance is not updated
         login_info.refresh_from_db()
@@ -566,21 +598,24 @@ class LoginInfoTests(TestCase):
     def test_non_admin_reject_team_vault_action_request_update(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="old_team_user", 
+            vault=self.team_vault,
+            login_username="old_team_user",
             login_password="old_team_password"
         )
 
         url = reverse('login-info-detail', args=[login_info.id])
-        data = {"login_username": "updated_team_user", "login_password": "updated_team_password"}
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
         response = self.client.patch(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
         self.client.force_authenticate(user=self.user2)
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
-        response = self.client.post(url)  # Non-admin tries to reject the request
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         action_request.refresh_from_db()
         self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
@@ -592,8 +627,8 @@ class LoginInfoTests(TestCase):
     def test_admin_reject_team_vault_action_request_delete(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="delete_team_user", 
+            vault=self.team_vault,
+            login_username="delete_team_user",
             login_password="delete_team_password"
         )
 
@@ -603,20 +638,22 @@ class LoginInfoTests(TestCase):
         self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
         action_request = TeamVaultActionRequest.objects.first()
 
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
         response = self.client.post(url)  # Admin rejects the request
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         action_request.refresh_from_db()
-        self.assertEqual(action_request.status, TeamVaultActionRequest.REJECTED)
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
 
         # Check if the logininfo instance is not deleted
         self.assertEqual(LoginInfo.objects.count(), 1)
-    
+
     def test_non_admin_reject_team_vault_action_request_delete(self):
         # Create a login info into the vault
         login_info = LoginInfo.objects.create(
-            vault=self.team_vault, 
-            login_username="delete_team_user", 
+            vault=self.team_vault,
+            login_username="delete_team_user",
             login_password="delete_team_password"
         )
 
@@ -627,8 +664,10 @@ class LoginInfoTests(TestCase):
         action_request = TeamVaultActionRequest.objects.first()
 
         self.client.force_authenticate(user=self.user2)
-        url = reverse('team-vault-action-request-reject', args=[action_request.id])
-        response = self.client.post(url)  # Non-admin tries to reject the request
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         action_request.refresh_from_db()
         self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
