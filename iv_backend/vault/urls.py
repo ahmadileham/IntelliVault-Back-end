@@ -23,7 +23,7 @@ router.register(r'team-vault-action-request', TeamVaultActionRequestViewSet, bas
 urlpatterns = [
     path('api/', include(router.urls)),
     path('file/download/<int:file_id>/',
-         FileDownloadView.as_view(), name='file-download-owner'),
+         FileDownloadView.as_view(), name='file-download'),
     path('file/download/<int:file_id>/<str:share_link>/',
          FileDownloadView.as_view(), name='file-download-shared'),
 

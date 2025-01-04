@@ -5,11 +5,13 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from collaboration.models import Team, TeamMembership
-from vault.models import Vault, LoginInfo, File, TeamVaultActionRequest
+from vault.models import Vault, LoginInfo, File, TeamVaultActionRequest, Item, SharedItem, SharedVault
 from django.test import TestCase
 from .utils import AESEncryption
-from io import BytesIO
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils.timezone import now, timedelta
+from django.contrib.contenttypes.models import ContentType
+
 
 User = get_user_model()
 aes = AESEncryption()
@@ -775,7 +777,7 @@ class FileTests(TestCase):
         url = reverse('file-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 0)        
+        self.assertEqual(len(response.data), 0)
 
     def test_create_file_personal_vault(self):
         url = reverse('file-list')
@@ -814,7 +816,8 @@ class FileTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         file_instance.refresh_from_db()
-        decrypted_content = aes.decrypt_file_content(file_instance.file_content)
+        decrypted_content = aes.decrypt_file_content(
+            file_instance.file_content)
         self.assertEqual(decrypted_content, b"Updated content.")
         self.assertEqual(file_instance.file_name, "updatedfile.txt")
 
@@ -893,7 +896,7 @@ class FileTests(TestCase):
         response = self.client.post(url, data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
-    
+
     def test_update_file_team_vault(self):
         # Create a file instance
         file_instance = File.objects.create(
@@ -969,7 +972,7 @@ class FileTests(TestCase):
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
-    
+
     def test_admin_approve_team_vault_action_request_create(self):
         # Create a login info into the vault
         file_url = reverse('file-list')
@@ -1032,7 +1035,7 @@ class FileTests(TestCase):
 
         # Check if the logininfo instance is not created
         self.assertEqual(File.objects.count(), 0)
-    
+
     def test_admin_approve_team_vault_action_request_update(self):
         # Create a file instance
         file_instance = File.objects.create(
@@ -1103,7 +1106,7 @@ class FileTests(TestCase):
         # Check if the file instance is not updated
         file_instance.refresh_from_db()
         self.assertEqual(file_instance.file_name, "testfile.txt")
-    
+
     def test_admin_approve_team_vault_action_request_delete(self):
         # Create a file instance
         file_instance = File.objects.create(
@@ -1128,10 +1131,10 @@ class FileTests(TestCase):
         action_request.refresh_from_db()
         self.assertEqual(action_request.status,
                          TeamVaultActionRequest.APPROVED)
-        
+
         # Check if the file instance is deleted
         self.assertEqual(File.objects.count(), 0)
-    
+
     def test_non_admin_approve_team_vault_action_request_delete(self):
         # Create a file instance
         file_instance = File.objects.create(
@@ -1190,7 +1193,7 @@ class FileTests(TestCase):
 
         # Check if the file instance is created
         self.assertEqual(File.objects.count(), 0)
-    
+
     def test_non_admin_reject_team_vault_action_request_create(self):
         # Create a FILE into the vault
         file_url = reverse('file-list')
@@ -1250,7 +1253,7 @@ class FileTests(TestCase):
         action_request.refresh_from_db()
         self.assertEqual(action_request.status,
                          TeamVaultActionRequest.REJECTED)
-        
+
         # Check if the file instance is not updated
         file_instance.refresh_from_db()
         self.assertEqual(file_instance.file_name, "testfile.txt")
@@ -1313,7 +1316,7 @@ class FileTests(TestCase):
         action_request.refresh_from_db()
         self.assertEqual(action_request.status,
                          TeamVaultActionRequest.REJECTED)
-        
+
         # Check if the file instance is not deleted
         self.assertEqual(File.objects.count(), 1)
 
@@ -1345,3 +1348,47 @@ class FileTests(TestCase):
 
         # Check if the file instance is not deleted
         self.assertEqual(File.objects.count(), 1)
+
+class FileDownloadTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="testuser", password="testpass", email="user@example.com")
+        self.vault = Vault.objects.create(name="Test Vault", owner=self.user)
+
+        # Use SimpleUploadedFile to create the file
+        self.uploaded_file = SimpleUploadedFile(
+            "test.txt", b"Sample file content", content_type="text/plain"
+        )
+        self.file = File.objects.create(
+            file_name=self.uploaded_file.name,
+            file_content=aes.encrypt_file_content(self.uploaded_file.read()),
+            mime_type=self.uploaded_file.content_type,
+            vault=self.vault,
+        )
+
+        self.share_link = "validsharelink"
+        self.shared_item = SharedItem.objects.create(
+            share_link=self.share_link,
+            access_password="hashedpassword",
+            shared_by=self.user,
+            expiry_date=now() + timedelta(days=1),
+            content_type=ContentType.objects.get_for_model(File),
+            object_id=self.file.id,
+        )
+
+    def test_authenticated_file_download(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(reverse("file-download", args=[self.file.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_file_download_with_valid_share_link(self):
+        response = self.client.get(reverse("file-download-shared", args=[self.file.id, self.share_link]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_file_download_with_invalid_share_link(self):
+        response = self.client.get(reverse("file-download-shared", args=[self.file.id, "invalidlink"]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthorized_file_download(self):
+        response = self.client.get(reverse("file-download", args=[self.file.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
