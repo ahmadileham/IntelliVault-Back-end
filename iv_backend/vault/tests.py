@@ -14,6 +14,7 @@ from django.contrib.contenttypes.models import ContentType
 from io import BytesIO
 from django.contrib.auth.hashers import make_password
 from .serializers import LoginInfoSerializer, FileSerializer
+from django.utils import timezone
 
 
 
@@ -1431,6 +1432,14 @@ class SharingTests(TestCase):
             mime_type="text/plain"
         )
 
+        self.expired_shared_item = SharedItem.objects.create(
+            item=self.login_info,
+            shared_by=self.user,
+            share_link="expiredlink123",
+            access_password=aes.encrypt_login_password("expired_password"),
+            expiry_date=timezone.now() - timedelta(days=1)  # Expired yesterday
+        )
+
     def test_create_shared_item(self):
         """Test creating a shared item (LoginInfo and File) with a password."""
         for item_type, item_id in [('logininfo', self.login_info.id), ('file', self.file.id)]:
@@ -1505,6 +1514,57 @@ class SharingTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('login_items', response.data)
         self.assertIn('file_items', response.data)
+
+    def test_access_shared_vault_wrong_password(self):
+        """Test accessing a shared vault with the wrong password."""
+        shared_vault = SharedVault.objects.create(
+            vault=self.vault,
+            shared_by=self.user,
+            share_link="vaultshare123",
+            access_password=make_password("correct_vault_password"),
+            expiry_date="2099-01-01"
+        )
+        response = self.client.post(
+            reverse('access-shared-vault', args=[shared_vault.share_link]),
+            data={'password': 'wrong_vault_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('error', response.data)
+    
+    def test_expired_shared_item_access(self):
+        """Test accessing an expired shared item."""
+        response = self.client.post(
+            reverse('access-shared-item', args=[self.expired_shared_item.share_link]),
+            data={'password': 'expired_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], 'Link has expired')
+
+    def test_invalid_item_id(self):
+        """Test sharing with a non-existent item ID."""
+        response = self.client.post(
+            reverse('share-item', args=['logininfo', 9999]),  # Non-existent ID
+            data={'password': 'test_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], 'Item not found')
+
+    def test_invalid_shared_item_access(self):
+        """Test accessing a shared item with a non-existent share link."""
+        response = self.client.post(
+            reverse('access-shared-item', args=['nonexistentlink123']),
+            data={'password': 'some_password'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn('error', response.data)
+        self.assertEqual(response.data['error'], 'Shared item not found')
+    
 
 class VaultItemsTests(TestCase):
     def setUp(self):
