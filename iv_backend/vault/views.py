@@ -259,6 +259,13 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
 
         # For personal vaults, update directly
         if not vault.is_team_vault:
+            # Handle file upload during update
+            if 'file_uploaded' in request.FILES:
+                file_uploaded = request.FILES['file_uploaded']
+                instance.file_content = aes.encrypt_file_content(file_uploaded.read())
+                instance.file_name = file_uploaded.name
+                instance.mime_type = file_uploaded.content_type
+
             serializer = self.get_serializer(
                 instance, data=request.data, partial=partial)
             serializer.is_valid(raise_exception=True)

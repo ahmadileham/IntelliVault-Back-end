@@ -5,13 +5,17 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from collaboration.models import Team, TeamMembership
-from vault.models import Vault, Item, LoginInfo, File, TeamVaultActionRequest
+from vault.models import Vault, LoginInfo, File, TeamVaultActionRequest
 from django.test import TestCase
+from .utils import AESEncryption
+from io import BytesIO
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 User = get_user_model()
+aes = AESEncryption()
 
 
-class VaultViewSetTestCase(APITestCase):
+class VaultTests(APITestCase):
 
     def setUp(self):
         # Create users
@@ -220,6 +224,21 @@ class LoginInfoTests(TestCase):
         self.client = APIClient()
         # Default login as user1
         self.client.login(username='user1', password='password1')
+
+    def test_retrieve_logininfo_list(self):
+        url = reverse('login-info-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_retrieve_other_user_logininfo(self):
+        login_info = LoginInfo.objects.create(
+            vault=self.personal_vault_user2,
+            login_username="test_user",
+            login_password="test_password"
+        )
+        url = reverse('login-info-detail', args=[login_info.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_create_logininfo_personal_vault(self):
         url = reverse('login-info-list')
@@ -674,3 +693,378 @@ class LoginInfoTests(TestCase):
 
         # Check if the logininfo instance is not deleted
         self.assertEqual(LoginInfo.objects.count(), 1)
+
+
+class FileTests(TestCase):
+    def setUp(self):
+        # Create users
+        self.user1 = User.objects.create_user(
+            username='user1', password='password1', email='user1@example.com')
+        self.user2 = User.objects.create_user(
+            username='user2', password='password2', email='user2@example.com')
+        self.user3 = User.objects.create_user(
+            username='user3', password='password3', email='user3@example.com')  # No access user
+
+        # Create personal vaults
+        self.personal_vault_user1 = Vault.objects.create(
+            owner=self.user1, name="User1 Personal Vault")
+        self.personal_vault_user2 = Vault.objects.create(
+            owner=self.user2, name="User2 Personal Vault")
+
+        # Create a team and team vault
+        self.team = Team.objects.create(name="Team1", creator=self.user1)
+        self.team_vault = Vault.objects.create(
+            owner=self.user1, team=self.team, name="Team Vault")
+
+        # Add memberships
+        TeamMembership.objects.create(
+            user=self.user1, team=self.team, role=TeamMembership.ADMIN)
+        TeamMembership.objects.create(
+            user=self.user2, team=self.team, role=TeamMembership.MEMBER)
+
+        # Set up API client
+        self.client = APIClient()
+        self.client.login(username='user1', password='password1')
+
+    def create_in_memory_file(self, name, content, mime_type="text/plain"):
+        """
+        Helper method to create an in-memory file with the specified content.
+        """
+        return SimpleUploadedFile(name, content.encode(), content_type=mime_type)
+
+    def test_retrieve_file_list(self):
+        url = reverse('file-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_retrieve_file_detail(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user1,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_retrieve_other_user_file(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user2,
+            file_name="unauthorizedfile.txt",
+            file_content=aes.encrypt_file_content(b"Unauthorized content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_retrieve_other_user_file_list(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user2,
+            file_name="unauthorizedfile.txt",
+            file_content=aes.encrypt_file_content(b"Unauthorized content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 0)        
+
+    def test_create_file_personal_vault(self):
+        url = reverse('file-list')
+
+        # Use helper to create in-memory file
+        in_memory_file = self.create_in_memory_file(
+            "testfile.txt", "This is a test file content.")
+
+        data = {
+            "vault": self.personal_vault_user1.id,
+            "file_uploaded": in_memory_file,
+            "file_name": "testfile.txt"
+        }
+        response = self.client.post(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(File.objects.count(), 1)
+        self.assertEqual(File.objects.first().vault, self.personal_vault_user1)
+
+    def test_update_file_personal_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user1,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to create updated file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file, "file_name": "updatedfile.txt"}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        file_instance.refresh_from_db()
+        decrypted_content = aes.decrypt_file_content(file_instance.file_content)
+        self.assertEqual(decrypted_content, b"Updated content.")
+        self.assertEqual(file_instance.file_name, "updatedfile.txt")
+
+    def test_delete_file_personal_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user1,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(File.objects.count(), 0)
+
+    def test_unauthorized_access(self):
+        # Create a file in user1's vault
+        file_instance = File.objects.create(
+            vault=self.personal_vault_user1,
+            file_name="unauthorizedfile.txt",
+            file_content=aes.encrypt_file_content(b"Unauthorized content"),
+            mime_type="text/plain"
+        )
+
+        # Authenticate as user2 (no access)
+        self.client.login(username='user2', password='password2')
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Attempt to access the file
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Attempt to update the file
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Attempt to delete the file
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_create_file_team_vault(self):
+        url = reverse('file-list')
+
+        # Use helper to create team file
+        in_memory_file = self.create_in_memory_file(
+            "teamfile.txt", "This is a team vault file content.")
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": in_memory_file,
+        }
+        response = self.client.post(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.CREATE)
+
+    def test_non_member_create_file_team_vault(self):
+        self.client.login(username='user3', password='password3')
+        url = reverse('file-list')
+
+        # Use helper to create unauthorized file
+        in_memory_file = self.create_in_memory_file(
+            "unauthorizedfile.txt", "This is unauthorized content.")
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": in_memory_file,
+        }
+        response = self.client.post(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
+    
+    def test_update_file_team_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to create updated file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.UPDATE)
+
+    def test_non_member_update_file_team_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to create updated file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        self.client.login(username='user3', password='password3')
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
+
+    def test_delete_file_team_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.DELETE)
+
+    def test_non_member_delete_file_team_vault(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        self.client.login(username='user3', password='password3')
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 0)
+    
+    def test_admin_approve_team_vault_action_request_create(self):
+        # Create a login info into the vault
+        file_url = reverse('file-list')
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": self.create_in_memory_file(
+                "teamfile.txt", "This is a team vault file content."),
+            "file_name": "teamfile.txt"
+        }
+
+        client2 = APIClient()
+        client2.force_authenticate(user=self.user2)
+
+        response = client2.post(file_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin approves the request
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
+
+        # Check if the logininfo instance is created
+        self.assertEqual(File.objects.count(), 1)
+        file = File.objects.first()
+        self.assertEqual(file.file_name, "teamfile.txt")
+
+    def test_non_admin_approve_team_vault_action_request_create(self):
+        # Create a login info into the vault
+        file_url = reverse('file-list')
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": self.create_in_memory_file(
+                "teamfile.txt", "This is a team vault file content."),
+            "file_name": "teamfile.txt"
+        }
+
+        client2 = APIClient()
+        client2.force_authenticate(user=self.user2)
+
+        response = client2.post(file_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        # Non-admin tries to approve the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the logininfo instance is not created
+        self.assertEqual(File.objects.count(), 0)
+    
+    def test_admin_approve_team_vault_action_request_update(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to update file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.UPDATE)
+
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin approves the request
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
+
+        # Check if the file instance is updated
+        file_instance.refresh_from_db()
+        self.assertEqual(file_instance.file_name, "updatedfile.txt")
+    
