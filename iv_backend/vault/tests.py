@@ -1067,4 +1067,281 @@ class FileTests(TestCase):
         # Check if the file instance is updated
         file_instance.refresh_from_db()
         self.assertEqual(file_instance.file_name, "updatedfile.txt")
+
+    def test_non_admin_approve_team_vault_action_request_update(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to update file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.UPDATE)
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        # Non-admin tries to approve the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the file instance is not updated
+        file_instance.refresh_from_db()
+        self.assertEqual(file_instance.file_name, "testfile.txt")
     
+    def test_admin_approve_team_vault_action_request_delete(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.DELETE)
+
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin approves the request
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.APPROVED)
+        
+        # Check if the file instance is deleted
+        self.assertEqual(File.objects.count(), 0)
+    
+    def test_non_admin_approve_team_vault_action_request_delete(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.DELETE)
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-approve',
+                      args=[action_request.id])
+        # Non-admin tries to approve the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the file instance is not deleted
+        self.assertEqual(File.objects.count(), 1)
+
+    def test_admin_reject_team_vault_action_request_create(self):
+        # Create a FILE into the vault
+        file_url = reverse('file-list')
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": self.create_in_memory_file(
+                "teamfile.txt", "This is a team vault file content."),
+            "file_name": "teamfile.txt"
+        }
+
+        client2 = APIClient()
+        client2.force_authenticate(user=self.user2)
+
+        response = client2.post(file_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin approves the request
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
+
+        # Check if the file instance is created
+        self.assertEqual(File.objects.count(), 0)
+    
+    def test_non_admin_reject_team_vault_action_request_create(self):
+        # Create a FILE into the vault
+        file_url = reverse('file-list')
+
+        data = {
+            "vault": self.team_vault.id,
+            "file_uploaded": self.create_in_memory_file(
+                "teamfile.txt", "This is a team vault file content."),
+            "file_name": "teamfile.txt"
+        }
+
+        client2 = APIClient()
+        client2.force_authenticate(user=self.user2)
+
+        response = client2.post(file_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the file instance is not created
+        self.assertEqual(File.objects.count(), 0)
+
+    def test_admin_reject_team_vault_action_request_update(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to create updated file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        response = self.client.post(url)  # Admin rejects the request
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
+        
+        # Check if the file instance is not updated
+        file_instance.refresh_from_db()
+        self.assertEqual(file_instance.file_name, "testfile.txt")
+
+    def test_non_admin_reject_team_vault_action_request_update(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Old content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to create updated file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the file instance is not updated
+        file_instance.refresh_from_db()
+        self.assertEqual(file_instance.file_name, "testfile.txt")
+
+    def test_admin_reject_team_vault_action_request_delete(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.DELETE)
+
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status,
+                         TeamVaultActionRequest.REJECTED)
+        
+        # Check if the file instance is not deleted
+        self.assertEqual(File.objects.count(), 1)
+
+    def test_non_admin_reject_team_vault_action_request_delete(self):
+        # Create a file instance
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.DELETE)
+
+        self.client.force_authenticate(user=self.user2)
+        url = reverse('team-vault-action-request-reject',
+                      args=[action_request.id])
+        # Non-admin tries to reject the request
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        action_request.refresh_from_db()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+
+        # Check if the file instance is not deleted
+        self.assertEqual(File.objects.count(), 1)
