@@ -1,9 +1,10 @@
 from collaboration.models import TeamMembership
-from .models import TeamVaultActionRequest, Item
+from .models import TeamVaultActionRequest, Item, Vault
 from .utils import create_team_vault_action_request
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import status
 from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
 
 
 class TeamRequestMixin:
@@ -80,3 +81,27 @@ class TeamRequestMixin:
     def check_team_membership(self, request, vault):
         """Check if the user is a member of the team associated with the vault."""
         return TeamMembership.objects.filter(user=request.user, team=vault.team).exists()
+
+class VaultItemValidationMixin:
+    """Mixin to handle vault validation logic for items."""
+
+    def validate_vault_change(self, current_vault, new_vault_id):
+        """Validate the vault change rules."""
+        if not new_vault_id or str(current_vault.id) == str(new_vault_id):
+            return  # No change in vault, so no validation needed
+
+        new_vault = get_object_or_404(Vault, id=new_vault_id)
+
+        # Rule 1: Cannot change the vault of items that belong to a team vault
+        if current_vault.is_team_vault:
+            raise ValidationError(
+                {"error": "Cannot change the vault of items belonging to a team vault."}
+            )
+
+        # Rule 2: Cannot move personal vault items to a team vault
+        if not current_vault.is_team_vault and new_vault.is_team_vault:
+            raise ValidationError(
+                {"error": "Cannot move personal vault items to a team vault."}
+            )
+
+        return new_vault

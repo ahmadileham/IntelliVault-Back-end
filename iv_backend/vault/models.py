@@ -18,7 +18,7 @@ class Vault(models.Model):
 
     def __str__(self):
         return self.name + ' - ' + self.owner.username
-    
+
     @property
     def is_team_vault(self):
         return self.team is not None
@@ -47,6 +47,7 @@ class File(Item):
     file_content = models.BinaryField()  # Encrypted file content
     mime_type = models.CharField(max_length=255)
     shared_items = GenericRelation('SharedItem')
+
 
 class TeamVaultActionRequest(models.Model):
     CREATE = 'create'

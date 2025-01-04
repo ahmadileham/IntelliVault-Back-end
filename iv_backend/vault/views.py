@@ -2,7 +2,7 @@ from django.forms import ValidationError
 from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
-from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item, create_team_vault_action_request
+from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item
 from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer, TeamVaultActionRequestSerializer
 from .models import Vault, Item, LoginInfo, File, SharedVault, SharedItem, TeamVaultActionRequest
 from django.urls import reverse
@@ -17,7 +17,7 @@ from django.core.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from django.utils import timezone
 from django.db.models import Q
-from .mixins import TeamRequestMixin
+from .mixins import TeamRequestMixin, VaultItemValidationMixin
 import base64
 
 
@@ -42,8 +42,7 @@ class VaultViewSet(viewsets.ModelViewSet):
 
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can create vaults for the team.")
+                raise PermissionDenied('Only team admins can create team vaults.')
 
             serializer.save(owner=self.request.user, team=team)
         else:
@@ -56,8 +55,10 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can update team vaults.")
+                raise PermissionDenied('Only team admins can update team vaults.')
+            
+        if instance.owner != self.request.user:
+            raise PermissionDenied('You do not have permission to modify this vault.')
 
         serializer.save()
 
@@ -66,13 +67,15 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
-                raise PermissionDenied(
-                    "Only team admins can delete team vaults.")
+                raise PermissionDenied('Only team admins can delete team vaults.')
+        
+        if instance.owner != self.request.user:
+            raise PermissionDenied('You do not have permission to delete this vault.')
 
         instance.delete()
 
 
-class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
+class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin, VaultItemValidationMixin):
     serializer_class = LoginInfoSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -121,12 +124,19 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        if not self.is_user_a_member(request.user, vault.team):
+            raise PermissionDenied('You do not have permission to create a logininfo in this vault.')
 
         return super().handle_team_request(request, TeamVaultActionRequest.CREATE, vault, process_data=self.data_with_encrypted_password)
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         vault = instance.vault
+        new_vault_id = request.data.get('vault')
+
+        # Validate vault change
+        self.validate_vault_change(instance.vault, new_vault_id)
 
         # For personal vaults, update directly
         if not vault.is_team_vault:
@@ -143,6 +153,9 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         validation_response = self.validate_vault_id(request, vault)
         if validation_response:
             return validation_response
+        
+        if not self.is_user_a_member(request.user, vault.team):
+            raise PermissionDenied('You do not have permission to update this logininfo.')
 
         return super().handle_team_request(request, TeamVaultActionRequest.UPDATE, vault, instance, process_data=self.data_with_encrypted_password)
 
@@ -155,10 +168,13 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
             self.validate_vault_ownership(vault.id, request.user)
             instance.delete()
             return Response({"detail": "Deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        
+        if not self.is_user_a_member(request.user, vault.team):
+            raise PermissionDenied('You do not have permission to delete this logininfo.')
 
         return super().handle_team_request(request, TeamVaultActionRequest.DELETE, vault, instance)
 
-    def get_team_membership(self, user, team):
+    def is_user_a_member(self, user, team):
         return TeamMembership.objects.filter(user=user, team=team).first()
 
     def data_with_encrypted_password(self, request, data):
@@ -196,7 +212,7 @@ class LoginInfoViewSet(viewsets.ModelViewSet, TeamRequestMixin):
                 {"error": "You do not have permission to modify this vault."})
 
 
-class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
+class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin, VaultItemValidationMixin):
     serializer_class = FileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -244,9 +260,20 @@ class FileViewSet(viewsets.ModelViewSet, TeamRequestMixin):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         vault = instance.vault
+        new_vault_id = request.data.get('vault')
+
+        # Validate vault change
+        self.validate_vault_change(instance.vault, new_vault_id)
 
         # For personal vaults, update directly
         if not vault.is_team_vault:
+            # Handle file upload during update
+            if 'file_uploaded' in request.FILES:
+                file_uploaded = request.FILES['file_uploaded']
+                instance.file_content = aes.encrypt_file_content(file_uploaded.read())
+                instance.file_name = file_uploaded.name
+                instance.mime_type = file_uploaded.content_type
+
             serializer = self.get_serializer(
                 instance, data=request.data, partial=partial)
             serializer.is_valid(raise_exception=True)
@@ -399,6 +426,9 @@ class ShareItemView(views.APIView):
             elif item_type == Item.FILE:
                 item = File.objects.get(id=item_id)
 
+            if item.vault.is_team_vault:
+                raise PermissionDenied('Team vault items cannot be shared.')
+
             # Create shared item with the identified type and password
             shared_item = create_share_item(item, request.user, password)
 
@@ -426,6 +456,9 @@ class ShareVaultView(views.APIView):
 
         try:
             vault = Vault.objects.get(id=vault_id)
+
+            if vault.is_team_vault:
+                raise PermissionDenied('Team vaults cannot be shared.')
 
             # Create shared vault with the provided password
             shared_vault = create_share_vault(vault, request.user, password)
@@ -554,8 +587,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
 
     def _ensure_user_is_admin(self, team, user):
         if not TeamMembership.objects.filter(user=user, team=team, role=TeamMembership.ADMIN).exists():
-            raise Response(
-                {'detail': 'Only admins can process requests.'}, status=status.HTTP_403_FORBIDDEN)
+            raise PermissionDenied('Only team admins can approve/reject action requests.')
 
     def _handle_login_info_action(self, action_request):
         item_data = self._filter_item_data(action_request.item_data, LoginInfo)
@@ -564,7 +596,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             vault = self._get_vault(item_data.pop('vault'))
             LoginInfo.objects.create(vault=vault, **item_data)
         elif action_request.action == TeamVaultActionRequest.UPDATE:
-            vault = self._get_vault(item_data.pop('vault'))
+            vault = self._get_vault(item_data.pop('vault')) if 'vault' in item_data else None
             target = get_object_or_404(LoginInfo, id=item_data.get('id'))
             self._update_model_instance(target, item_data)
         elif action_request.action == TeamVaultActionRequest.DELETE:
@@ -580,7 +612,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             vault = self._get_vault(item_data.pop('vault'))
             File.objects.create(vault=vault, **item_data)
         elif action_request.action == TeamVaultActionRequest.UPDATE:
-            vault = self._get_vault(item_data.pop('vault'))
+            vault = self._get_vault(item_data.pop('vault')) if 'vault' in item_data else None
             target = get_object_or_404(File, id=item_data.get('id'))
             self._update_model_instance(target, item_data)
         elif action_request.action == TeamVaultActionRequest.DELETE:
@@ -616,7 +648,7 @@ class VaultItemsView(views.APIView):
 
             # Check if the user has access to the vault
             if not self.has_access_to_vault(request.user, vault):
-                return Response({'error': 'You do not have permission to access this vault.'}, status=status.HTTP_403_FORBIDDEN)
+                raise PermissionDenied('You do not have access to this vault.')
 
             # Retrieve all LoginInfo and File items for the vault
             login_items = LoginInfo.objects.filter(vault=vault)
