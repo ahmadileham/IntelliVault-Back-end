@@ -57,7 +57,7 @@ class CollaborationAppTests(APITestCase):
     # Team Membership Tests
     def test_member_can_join_team(self):
         url = reverse('team-membership-list')
-        data = {'team': self.team.id, 'role': TeamMembership.MEMBER}
+        data = {'team': self.team.id, 'role': TeamMembership.MEMBER, 'user': self.member_user.id}
 
         response = self.member_client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
