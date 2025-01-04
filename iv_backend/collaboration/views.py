@@ -12,6 +12,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from vault.models import Vault
 from vault.serializers import VaultSerializer
+from django.db.models import Q
+
 
 class TeamViewSet(viewsets.ModelViewSet):
     serializer_class = TeamSerializer
@@ -68,8 +70,11 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only return team memberships for the authenticated user
-        return TeamMembership.objects.filter(user=self.request.user)
+        # Only return team memberships for the authenticated user or for teams they are admin of
+        return TeamMembership.objects.filter(
+            Q(user=self.request.user) | 
+            Q(team__memberships__user=self.request.user, team__memberships__role=TeamMembership.ADMIN)
+        ).distinct()
 
     def perform_create(self, serializer):
         # Set the user as the authenticated user when creating a team membership
@@ -83,6 +88,20 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only team admins can modify roles.")
         
         serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        membership = self.get_object()
+
+        # Ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
+            raise PermissionDenied("Only team admins can remove members.")
+
+        # Prevent admins from removing themselves
+        if membership.user == request.user:
+            raise PermissionDenied("Admins cannot remove themselves from the team.")
+
+        self.perform_destroy(membership)
+        return Response({"detail": "Team membership removed successfully."}, status=status.HTTP_204_NO_CONTENT)
 
 
 class CreateInvitationView(APIView):

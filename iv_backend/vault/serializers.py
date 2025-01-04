@@ -1,12 +1,29 @@
 from rest_framework import serializers
+
+from authentication.serializers import CustomUserSerializer
+from authentication.models import CustomUser
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem, TeamVaultActionRequest
 import base64
 
 
 class VaultSerializer(serializers.ModelSerializer):
+    owner = CustomUserSerializer()
     class Meta:
         model = Vault
         fields = ['id', 'owner', 'team', 'name']
+
+class VaultWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vault
+        fields = ['id', 'owner','team', 'name']  # Exclude nested `owner`
+
+class VaultReadSerializer(serializers.ModelSerializer):
+    owner = CustomUserSerializer()  # Nested owner
+
+    class Meta:
+        model = Vault
+        fields = ['id', 'owner', 'team', 'name']
+    
 
 
 class LoginInfoSerializer(serializers.ModelSerializer):
@@ -49,6 +66,8 @@ class SharedVaultSerializer(serializers.ModelSerializer):
         fields = ['share_link', 'shared_by', 'shared_at', 'expiry_date']
 
 class TeamVaultActionRequestSerializer(serializers.ModelSerializer):
+    requester = CustomUserSerializer()
+    team_vault = VaultSerializer()
     class Meta:
         model = TeamVaultActionRequest
         fields = [
