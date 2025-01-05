@@ -18,7 +18,7 @@ router = DefaultRouter()
 router.register(r'vault', VaultViewSet, basename='vault')
 router.register(r'logininfo', LoginInfoViewSet, basename='login-info')
 router.register(r'file', FileViewSet, basename='file')
-router.register(r'team-vault-action-request', TeamVaultActionRequestViewSet, basename='team-vault-action-request')
+router.register(r'action-request', TeamVaultActionRequestViewSet, basename='team-vault-action-request')
 
 urlpatterns = [
     path('api/', include(router.urls)),

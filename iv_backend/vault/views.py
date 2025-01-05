@@ -553,6 +553,42 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return TeamVaultActionRequest.objects.filter(team_vault__team__memberships__user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        status_param = request.query_params.get("status")
+        team_id = request.query_params.get("team")
+        vault_id = request.query_params.get("vault")
+
+        # Validate required `team_id`
+        if not team_id:
+            return Response({"detail": "Team ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure the user is an admin for the team
+        team = get_object_or_404(Team, id=team_id)
+        self._ensure_user_is_admin(team, request.user)
+
+        # Base queryset
+        queryset = TeamVaultActionRequest.objects.filter(team_vault__team=team)
+
+        # Filter by `vault_id` if provided
+        if vault_id:
+            queryset = queryset.filter(team_vault__id=vault_id)
+
+        # Filter by `status` if provided
+        if status_param == "pending":
+            queryset = queryset.filter(status=TeamVaultActionRequest.PENDING)
+        elif status_param in ["approved", "rejected"]:
+            queryset = queryset.filter(status=status_param)
+        elif status_param:
+            return Response({"detail": "Invalid status parameter."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serialized_data = self.get_serializer(queryset, many=True).data
+        return Response(serialized_data, status=status.HTTP_200_OK)
+
+    def _ensure_user_is_admin(self, team, user):
+        """Ensure the requesting user is an admin for the team."""
+        if not TeamMembership.objects.filter(user=user, team=team, role=TeamMembership.ADMIN).exists():
+            raise PermissionDenied("Only team admins can view action requests.")
+
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         action_request = self._get_and_validate_action_request(pk)

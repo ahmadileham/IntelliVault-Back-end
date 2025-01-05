@@ -1743,4 +1743,58 @@ class VaultItemsTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('error', response.data)
         self.assertEqual(response.data['error'], "Cannot move personal vault items to a team vault.")
-        
+
+class ActionRequestListTest(APITestCase):
+    def setUp(self):
+        self.admin_user = User.objects.create_user(username="admin", password="adminpass", email="a@a.com")
+        self.member_user = User.objects.create_user(username="member", password="memberpass", email="b@b.com")
+        self.team = Team.objects.create(name="Test Team", creator=self.admin_user)
+        self.vault = Vault.objects.create(name="Test Vault", team=self.team, owner=self.admin_user)
+
+        TeamMembership.objects.create(user=self.admin_user, team=self.team, role=TeamMembership.ADMIN)
+        TeamMembership.objects.create(user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
+
+        self.action_request_1 = TeamVaultActionRequest.objects.create(
+            requester=self.admin_user, team_vault=self.vault, action="create", item_type="logininfo",
+            item_data={}, status=TeamVaultActionRequest.PENDING
+        )
+        self.action_request_2 = TeamVaultActionRequest.objects.create(
+            requester=self.admin_user, team_vault=self.vault, action="create", item_type="logininfo",
+            item_data={}, status=TeamVaultActionRequest.APPROVED
+        )
+        self.action_request_3 = TeamVaultActionRequest.objects.create(
+            requester=self.admin_user, team_vault=self.vault, action="create", item_type="logininfo",
+            item_data={}, status=TeamVaultActionRequest.REJECTED
+        )
+
+    def test_admin_can_filter_pending_requests_for_team(self):
+        self.client.login(username="admin", password="adminpass")
+        url = reverse("team-vault-action-request-list") + f"?status=pending&team={self.team.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_admin_can_filter_all_requests_for_vault(self):
+        self.client.login(username="admin", password="adminpass")
+        url = reverse("team-vault-action-request-list") + f"?team={self.team.id}&vault={self.vault.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 3)
+
+    def test_member_cannot_access_requests(self):
+        self.client.login(username="member", password="memberpass")
+        url = reverse("team-vault-action-request-list") + f"?team={self.team.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_invalid_status_returns_error(self):
+        self.client.login(username="admin", password="adminpass")
+        url = reverse("team-vault-action-request-list") + f"?status=invalid&team={self.team.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_team_id_is_required(self):
+        self.client.login(username="admin", password="adminpass")
+        url = reverse("team-vault-action-request-list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
