@@ -25,8 +25,6 @@ class CollaborationAppTests(APITestCase):
             name="Test Team", creator=self.admin_user)
         self.admin = TeamMembership.objects.create(
             user=self.admin_user, team=self.team, role=TeamMembership.ADMIN)
-        self.member_membership = TeamMembership.objects.create(
-            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
         
 
         # Auth clients for users
@@ -178,11 +176,13 @@ class CollaborationAppTests(APITestCase):
         self.assertEqual(len(response.data), 0)
 
     def test_member_can_leave_team(self):
-        url = reverse('team-membership-leave-team', kwargs={'pk': self.member_membership.id})
+        member_membership = TeamMembership.objects.create(
+            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
+        url = reverse('team-membership-leave-team', kwargs={'pk': member_membership.id})
 
         response = self.member_client.post(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(TeamMembership.objects.filter(id=self.member_membership.id).exists())
+        self.assertFalse(TeamMembership.objects.filter(id=member_membership.id).exists())
 
     def test_admin_cannot_leave_as_only_admin(self):
         url = reverse('team-membership-leave-team', kwargs={'pk': self.admin_user.id})
@@ -192,11 +192,13 @@ class CollaborationAppTests(APITestCase):
         self.assertEqual(response.data['detail'], "You cannot leave the team as the only admin.")
 
     def test_admin_can_kick_member(self):
-        url = reverse('team-membership-kick-member', kwargs={'pk': self.member_membership.id})
+        member_membership = TeamMembership.objects.create(
+            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
+        url = reverse('team-membership-kick-member', kwargs={'pk': member_membership.id})
 
         response = self.admin_client.post(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(TeamMembership.objects.filter(id=self.member_membership.id).exists())
+        self.assertFalse(TeamMembership.objects.filter(id=member_membership.id).exists())
 
     def test_admin_cannot_kick_self(self):
         admin_membership = TeamMembership.objects.get(user=self.admin_user, team=self.team)
@@ -207,22 +209,28 @@ class CollaborationAppTests(APITestCase):
         self.assertEqual(response.data['detail'], "Admins cannot perform this action on themselves.")
 
     def test_non_admin_cannot_kick_member(self):
-        url = reverse('team-membership-kick-member', kwargs={'pk': self.member_membership.id})
+        member_membership = TeamMembership.objects.create(
+            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
+        url = reverse('team-membership-kick-member', kwargs={'pk': member_membership.id})
 
         response = self.member_client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertTrue(TeamMembership.objects.filter(id=self.member_membership.id).exists())
+        self.assertTrue(TeamMembership.objects.filter(id=member_membership.id).exists())
 
     def test_non_member_cannot_kick_member(self):
-        url = reverse('team-membership-kick-member', kwargs={'pk': self.member_membership.id})
+        member_membership = TeamMembership.objects.create(
+            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
+        url = reverse('team-membership-kick-member', kwargs={'pk': member_membership.id})
 
         response = self.other_client.post(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertTrue(TeamMembership.objects.filter(id=self.member_membership.id).exists())
+        self.assertTrue(TeamMembership.objects.filter(id=member_membership.id).exists())
 
     def test_non_member_cannot_leave_team(self):
+        member_membership = TeamMembership.objects.create(
+            user=self.member_user, team=self.team, role=TeamMembership.MEMBER)
         # Simulate a "membership" id for a user who is not a member
-        fake_membership_id = self.member_membership.id + 100  # Arbitrary unused ID
+        fake_membership_id = member_membership.id + 100  # Arbitrary unused ID
         url = reverse('team-membership-leave-team', kwargs={'pk': fake_membership_id})
 
         response = self.other_client.post(url)
