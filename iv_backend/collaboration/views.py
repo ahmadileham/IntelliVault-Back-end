@@ -41,12 +41,27 @@ class TeamViewSet(viewsets.ModelViewSet):
         # Check if the user is a member of the team
         team = get_object_or_404(Team, pk=pk)
         if not TeamMembership.objects.filter(user=request.user, team=team).exists():
-            return Response({"detail": "You are not a member of this team."}, status=status.HTTP_403_FORBIDDEN)
+            raise PermissionDenied("You are not a member of this team.")
 
         # Retrieve all members of the team
         memberships = TeamMembership.objects.filter(team=team)
         serializer = TeamMembershipSerializer(memberships, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    # get admins
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def admins(self, request, pk=None):
+        # Check if the user is a member of the team
+        team = get_object_or_404(Team, pk=pk)
+        if not TeamMembership.objects.filter(user=request.user, team=team).exists():
+            raise PermissionDenied("You are not a member of this team.")
+
+        # Retrieve all admins of the team
+        memberships = TeamMembership.objects.filter(team=team, role='admin')
+        serializer = TeamMembershipSerializer(memberships, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
 
     @action(detail=True, methods=['get'], url_path='vaults', permission_classes=[IsAuthenticated])
     def get_team_vaults(self, request, pk=None):
@@ -55,7 +70,7 @@ class TeamViewSet(viewsets.ModelViewSet):
 
         # Check if the user is a member of the team
         if not TeamMembership.objects.filter(user=request.user, team=team).exists():
-            return Response({"detail": "You are not a member of this team."}, status=status.HTTP_403_FORBIDDEN)
+            raise PermissionDenied("You are not a member of this team.")
 
         # Retrieve all vaults associated with the team
         vaults = Vault.objects.filter(team=team)
@@ -68,21 +83,61 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only return team memberships for the authenticated user
         return TeamMembership.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        # Set the user as the authenticated user when creating a team membership
         serializer.save(user=self.request.user)
 
     def perform_update(self, serializer):
         membership = self.get_object()
-
-        # Ensure the user is an admin of the team
-        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
-            raise PermissionDenied("Only team admins can modify roles.")
-        
+        self._ensure_admin_privileges(membership.team)
         serializer.save()
+
+    def _ensure_admin_privileges(self, team):
+        """Check if the authenticated user is an admin of the specified team."""
+        if not TeamMembership.objects.filter(
+            user=self.request.user, team=team, role=TeamMembership.ADMIN
+        ).exists():
+            raise PermissionDenied("Only team admins can perform this action.")
+
+    def _ensure_not_self_action(self, membership):
+        """Prevent admins from performing certain actions on themselves."""
+        if membership.user == self.request.user:
+            raise PermissionDenied("Admins cannot perform this action on themselves.")
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def leave_team(self, request, pk=None):
+        membership = get_object_or_404(TeamMembership, id=pk, user=request.user)
+
+        # Prevent the only admin from leaving the team
+        if membership.role == TeamMembership.ADMIN:
+            if TeamMembership.objects.filter(
+                team=membership.team, role=TeamMembership.ADMIN
+            ).count() <= 1:
+                return Response(
+                    {"detail": "You cannot leave the team as the only admin."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        membership.delete()
+        return Response(
+            {"detail": "You have successfully left the team."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def kick_member(self, request, pk=None):
+        membership = get_object_or_404(TeamMembership, id=pk)
+        team = membership.team
+
+        self._ensure_admin_privileges(team)
+        self._ensure_not_self_action(membership)
+
+        membership.delete()
+        return Response(
+            {"detail": f"{membership.user.username} has been removed from the team."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class CreateInvitationView(APIView):
