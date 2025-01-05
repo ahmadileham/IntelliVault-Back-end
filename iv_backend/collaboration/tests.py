@@ -23,7 +23,7 @@ class CollaborationAppTests(APITestCase):
         # Create a team and add the admin
         self.team = Team.objects.create(
             name="Test Team", creator=self.admin_user)
-        self.admin = TeamMembership.objects.create(
+        TeamMembership.objects.create(
             user=self.admin_user, team=self.team, role=TeamMembership.ADMIN)
         
 
@@ -188,6 +188,7 @@ class CollaborationAppTests(APITestCase):
         url = reverse('team-membership-leave-team', kwargs={'pk': self.admin_user.id})
 
         response = self.admin_client.post(url)
+        print(response.data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data['detail'], "You cannot leave the team as the only admin.")
 
