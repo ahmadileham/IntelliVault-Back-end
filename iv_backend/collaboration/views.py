@@ -92,16 +92,27 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         membership = self.get_object()
 
-        # Ensure the user is an admin of the team
-        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
-            raise PermissionDenied("Only team admins can remove members.")
-
-        # Prevent admins from removing themselves
+        # Check if the user is the membership owner (removing their own membership)
         if membership.user == request.user:
-            raise PermissionDenied("Admins cannot remove themselves from the team.")
+            self.perform_destroy(membership)
+            return Response(
+                {"detail": "You have successfully left the team."},
+                status=status.HTTP_204_NO_CONTENT
+            )
 
+        # Otherwise, ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(
+            user=self.request.user, team=membership.team, role=TeamMembership.ADMIN
+        ).exists():
+            raise PermissionDenied("Only team admins can remove other members.")
+
+        # Proceed with removing the member
         self.perform_destroy(membership)
-        return Response({"detail": "Team membership removed successfully."}, status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {"detail": "Team membership removed successfully."},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
 
 
 class CreateInvitationView(APIView):

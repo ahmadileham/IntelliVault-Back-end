@@ -67,6 +67,7 @@ class SharedVaultSerializer(serializers.ModelSerializer):
 
 class TeamVaultActionRequestSerializer(serializers.ModelSerializer):
     requester = CustomUserSerializer()
+    authorized_by = CustomUserSerializer(allow_null=True)
     team_vault = VaultSerializer()
     class Meta:
         model = TeamVaultActionRequest

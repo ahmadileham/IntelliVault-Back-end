@@ -735,6 +735,24 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(team_requests, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=["get"], url_path="by-team-vault")
+    def get_requests_by_team_vault(self, request):
+        team_vault_id = request.query_params.get("team_vault_id")
+        if not team_vault_id:
+            return Response(
+                {"detail": "Team Vault ID is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Fetch requests for the specific team_vault ID and validate access
+        team_vault_requests = TeamVaultActionRequest.objects.filter(
+            team_vault__id=team_vault_id,
+            team_vault__team__memberships__user=request.user,
+        )
+
+        serializer = self.get_serializer(team_vault_requests, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
