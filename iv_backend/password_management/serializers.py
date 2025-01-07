@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import GeneratedPassword
+from .models import GeneratedPassword, PasswordAnalysis, PasswordIssue
+from vault.models import LoginInfo
 
 class GeneratedPasswordSerializer(serializers.ModelSerializer):
     class Meta:
@@ -13,3 +14,24 @@ class PasswordCreateSerializer(serializers.Serializer):
     use_uppercase = serializers.BooleanField(default=False)
     use_numbers = serializers.BooleanField(default=False)
     use_special_chars = serializers.BooleanField(default=False)
+
+class PasswordAnalysisSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PasswordAnalysis
+        fields = ['id', 'vault', 'analysis_date', 'reused_passwords_count', 
+                 'similar_passwords_count', 'breached_passwords_count']
+
+class PasswordIssueSerializer(serializers.ModelSerializer):
+    login_username = serializers.CharField(source='login_info.login_username')
+    
+    class Meta:
+        model = PasswordIssue
+        fields = ['id', 'issue_type', 'login_username', 'similarity_score', 'details']
+
+class VaultAnalysisResultSerializer(serializers.ModelSerializer):
+    issues = PasswordIssueSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = PasswordAnalysis
+        fields = ['id', 'vault', 'analysis_date', 'reused_passwords_count', 
+                 'similar_passwords_count', 'breached_passwords_count', 'issues']
