@@ -113,6 +113,7 @@ class PasswordAnalyzer:
             similarity_score = self.similarity_checker.calculate_similarity(password)
             
             if similarity_score > 50:  # If similarity is greater than 50%
+                print('similarity score is ', similarity_score)
                 PasswordIssue.objects.create(
                     analysis=analysis,
                     login_info_id=login_info_id,
