@@ -108,4 +108,4 @@ class PasswordSimilarityChecker:
         # Clip to ensure we don't exceed 100%
         similarity = min(similarity, 100.0)
         
-        return similarity, closest_cluster
+        return similarity
