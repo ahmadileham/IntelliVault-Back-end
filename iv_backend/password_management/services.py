@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import List, Dict, Any
 from vault.utils import AESEncryption
 from .models import PasswordAnalysis, PasswordIssue
-from .password_similarity import PasswordSimilarityChecker
+from .utils import PasswordSimilarityChecker
 import logging
 from vault.models import LoginInfo, Vault
 
