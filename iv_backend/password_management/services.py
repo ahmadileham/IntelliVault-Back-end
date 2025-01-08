@@ -119,7 +119,7 @@ class PasswordAnalyzer:
                     issue_type=PasswordIssue.SIMILAR,
                     similarity_score=similarity_score,
                     details={
-                        'similarity_percentage': round(similarity_score * 100, 2)
+                        'similarity_percentage': round(similarity_score, 2)
                     }
                 )
     
