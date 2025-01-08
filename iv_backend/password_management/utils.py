@@ -54,7 +54,7 @@ class PasswordSimilarityChecker:
         
         return X
 
-    def compute_password_similarity(self, password):
+    def calculate_similarity(self, password):
         """
         Compute similarity percentage between input password and breached password clusters.
         
