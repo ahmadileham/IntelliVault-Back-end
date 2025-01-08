@@ -112,7 +112,7 @@ class PasswordAnalyzer:
         for login_info_id, password in decrypted_passwords.items():
             similarity_score = self.similarity_checker.calculate_similarity(password)
             
-            if similarity_score > 0.5:  # If similarity is greater than 50%
+            if similarity_score > 50:  # If similarity is greater than 50%
                 PasswordIssue.objects.create(
                     analysis=analysis,
                     login_info_id=login_info_id,
