@@ -1,10 +1,16 @@
 import random
 import string
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, views
 from rest_framework.response import Response
-from .models import GeneratedPassword
-from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer
+from .models import GeneratedPassword, PasswordAnalysis, PasswordIssue
+from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import action
+from django.shortcuts import get_object_or_404
+from vault.models import Vault, LoginInfo
+from vault.utils import AESEncryption
+from .services import PasswordAnalyzer
+from django.db.models import Q
 
 # Helper function to generate password based on user preferences
 def generate_password(length, use_uppercase, use_numbers, use_special_chars):
@@ -63,3 +69,39 @@ class GeneratedPasswordViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().filter(generated_by=request.user).order_by('-date_generated')[:10]
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+class PasswordAnalysisViewSet(viewsets.ModelViewSet):
+    serializer_class = PasswordAnalysisSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return PasswordAnalysis.objects.filter(
+            Q(vault__owner=self.request.user) | 
+            Q(vault__team__memberships__user=self.request.user)
+        ).distinct()
+
+    @action(detail=False, methods=['post'])
+    def analyze_passwords(self, request):
+        
+        # Perform the analysis
+        analyzer = PasswordAnalyzer()
+        analysis = analyzer.perform_analysis(request.user)
+        
+        serializer = PasswordAnalysisSerializer(analysis)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def latest_analysis(self, request):
+            
+        analysis = PasswordAnalysis.objects.filter(
+            user=request.user
+        ).order_by('-analysis_date').first()
+        
+        if not analysis:
+            return Response(
+                {'error': 'No analysis found for this vault'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+        serializer = PasswordAnalysisSerializer(analysis)
+        return Response(serializer.data)
