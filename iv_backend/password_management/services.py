@@ -6,7 +6,7 @@ from vault.utils import AESEncryption
 from .models import PasswordAnalysis, PasswordIssue
 from .utils import PasswordSimilarityChecker
 import logging
-from vault.models import LoginInfo, Vault
+from vault.models import LoginInfo
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +42,15 @@ class PasswordAnalyzer:
         self.similarity_checker = PasswordSimilarityChecker()
         self.hibp_api = HaveIBeenPwnedAPI()
     
-    def analyze_vault(self, vault, user) -> PasswordAnalysis:
-        """Perform comprehensive password analysis on a vault."""
+    def perform_analysis(self, user) -> PasswordAnalysis:
+        """Perform comprehensive password analysis for a user."""
         # Create new analysis instance
         analysis = PasswordAnalysis.objects.create(
-            user=user,
-            vault=vault
+            user=user
         )
         
-        # Get all login infos from the vault
-        login_infos = vault.logininfo_set.all()
+        # Get all login infos
+        login_infos = LoginInfo.objects.filter(vault__owner=user, vault__team__isnull=True)
         
         # Decrypt passwords and store mapping
         password_map = {}  # Maps password to list of LoginInfo objects

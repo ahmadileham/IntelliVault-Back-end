@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from vault.models import LoginInfo, Vault
+from collaboration.models import Team
 
 class GeneratedPassword(models.Model):
     generated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='generated_passwords')
@@ -14,7 +15,7 @@ class GeneratedPassword(models.Model):
 
 class PasswordAnalysis(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, null=True, blank=True)
     analysis_date = models.DateTimeField(auto_now_add=True)
     reused_passwords_count = models.IntegerField(default=0)
     similar_passwords_count = models.IntegerField(default=0)

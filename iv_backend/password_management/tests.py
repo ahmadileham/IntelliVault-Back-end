@@ -104,28 +104,22 @@ class PasswordAnalysisTests(APITestCase):
             login_password=aes.encrypt_login_password("test_password_4")
         )
 
-    def test_analyze_vault(self):
-        url = reverse('password-analysis-analyze-vault')  # Adjust the URL name as necessary
-        data = {
-            'vault_id': self.vault.id
-        }
-        response = self.client.post(url, data, format='json')
+    def test_analyze_passwords(self):
+        url = reverse('password-analysis-analyze-passwords')  # Adjust the URL name as necessary
+        
+        response = self.client.post(url, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('id', response.data)  # Check if analysis ID is returned
-        self.assertEqual(response.data['vault'], self.vault.id)
         print(response.data)
 
     def test_latest_analysis(self):
         # First, perform an analysis to create an analysis record
-        self.test_analyze_vault()
+        self.test_analyze_passwords()
 
         url = reverse('password-analysis-latest-analysis')  # Adjust the URL name as necessary
-        data = {
-            'vault_id': self.vault.id
-        }
-        response = self.client.get(url, data, format='json')
+        
+        response = self.client.get(url,format='json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('id', response.data)  # Check if analysis ID is returned
-        self.assertEqual(response.data['vault'], self.vault.id)

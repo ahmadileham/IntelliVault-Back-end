@@ -3,7 +3,7 @@ import string
 from rest_framework import viewsets, status, views
 from rest_framework.response import Response
 from .models import GeneratedPassword, PasswordAnalysis, PasswordIssue
-from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer, VaultAnalysisResultSerializer
+from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
@@ -81,42 +81,20 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
         ).distinct()
 
     @action(detail=False, methods=['post'])
-    def analyze_vault(self, request):
-        vault_id = request.data.get('vault_id')
-        if not vault_id:
-            return Response(
-                {'error': 'vault_id is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        vault = get_object_or_404(Vault, id=vault_id)
+    def analyze_passwords(self, request):
         
-        # Check if user has access to the vault
-        if not (vault.owner == request.user or 
-                vault.team and vault.team.memberships.filter(user=request.user).exists()):
-            return Response(
-                {'error': 'You do not have access to this vault'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         # Perform the analysis
         analyzer = PasswordAnalyzer()
-        analysis = analyzer.analyze_vault(vault, request.user)
+        analysis = analyzer.perform_analysis(request.user)
         
-        serializer = VaultAnalysisResultSerializer(analysis)
+        serializer = PasswordAnalysisSerializer(analysis)
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def latest_analysis(self, request):
-        vault_id = request.query_params.get('vault_id')
-        if not vault_id:
-            return Response(
-                {'error': 'vault_id is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
             
         analysis = PasswordAnalysis.objects.filter(
-            vault_id=vault_id
+            user=request.user
         ).order_by('-analysis_date').first()
         
         if not analysis:
@@ -125,5 +103,5 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
             
-        serializer = VaultAnalysisResultSerializer(analysis)
+        serializer = PasswordAnalysisSerializer(analysis)
         return Response(serializer.data)
