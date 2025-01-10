@@ -19,6 +19,16 @@ from django.utils import timezone
 from django.db.models import Q
 from .mixins import TeamRequestMixin, VaultItemValidationMixin
 import base64
+from iv_backend.model_utils import (
+    load_model,
+    predict,
+    load_model1,
+    extract_features,
+    predict1,
+)
+
+model = load_model()
+model1 = load_model1()
 
 
 aes = AESEncryption()
@@ -749,3 +759,64 @@ class VaultItemsView(views.APIView):
                     "decrypted_password": f"Error: {str(e)}"
                 })
         return decrypted_items
+    
+class AIView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        try:
+            # Retrieve and validate fields as integers
+            time = int(request.data.get("time"))
+            attempt = int(request.data.get("attempt"))
+            location = int(request.data.get("location"))
+            input_data = [time, attempt, location]
+        except (ValueError, TypeError) as e:
+            # Return a 400 error if any field is invalid or missing
+            return Response(
+                {"error": "All fields (time, attempt, location) must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Return success response if all validations pass
+
+        # Make prediction
+        prediction = predict(model, input_data)
+        # return JsonResponse({'success':True,'prediction' :'normal' if prediction[0] == 1 else 'anomalous' },status= status.HTTP_200_OK)
+        return Response(
+            {
+                "message": f"Data received successfully. Time: {time}, Attempt: {attempt}, Location: {location}",
+                "prediction": "normal" if prediction[0] == 1 else "anomalous",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AnotherAIView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        try:
+            # Example of another post request logic
+            link = request.data.get("link")
+            if not link:
+                return Response(
+                    {"error": "'link' is required in the request body."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except Exception as e:
+            return Response(
+                {"error": "Something went wrong.", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        prediction = predict1(model1, extract_features(link))
+        # obj = FeatureExtraction(link)
+        # x = np.array(obj.getFeaturesList()).reshape(1,30)
+        # y_pred =gbc.predict(x)[0]
+
+        return Response(
+            {
+                "message": f"Another POST request processed successfully. Data: {link}",
+                "prediction": "valid" if prediction == 1 else "phishing",
+            },
+            status=status.HTTP_200_OK,
+        )
