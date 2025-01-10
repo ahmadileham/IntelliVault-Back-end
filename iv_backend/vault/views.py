@@ -686,7 +686,6 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             action_request.authorized_at = timezone.now()
         action_request.save()
 
-
 class VaultItemsView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -697,27 +696,56 @@ class VaultItemsView(views.APIView):
 
             # Check if the user has access to the vault
             if not self.has_access_to_vault(request.user, vault):
-                raise PermissionDenied('You do not have access to this vault.')
+                return Response(
+                    {"error": "You do not have permission to access this vault."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
             # Retrieve all LoginInfo and File items for the vault
             login_items = LoginInfo.objects.filter(vault=vault)
             file_items = File.objects.filter(vault=vault)
 
-            # Serialize the items
-            login_serializer = LoginInfoSerializer(login_items, many=True)
+            # Serialize the file items
             file_serializer = FileSerializer(file_items, many=True)
+
+            # Serialize and decrypt login items
+            login_serializer = LoginInfoSerializer(login_items, many=True)
+            decrypted_login_items = self.add_decrypted_passwords(login_serializer.data)
 
             # Combine the serialized data
             response_data = {
-                'login_items': login_serializer.data,
-                'file_items': file_serializer.data
+                "login_items": decrypted_login_items,
+                "file_items": file_serializer.data,
             }
 
             return Response(response_data, status=status.HTTP_200_OK)
 
         except Vault.DoesNotExist:
-            return Response({'error': 'Vault not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Vault not found."}, status=status.HTTP_404_NOT_FOUND
+            )
 
     def has_access_to_vault(self, user, vault):
-        """Check if the user has access to the vault."""
-        return vault.owner == user or TeamMembership.objects.filter(user=user, team=vault.team).exists()
+        """Check if the user has access to the given vault."""
+        return (
+            vault.owner == user
+            or vault.team.memberships.filter(user=user).exists()
+        )
+
+    def add_decrypted_passwords(self, login_items):
+        """Decrypt the passwords for the serialized login items."""
+        decrypted_items = []
+        for item in login_items:
+            try:
+                decrypted_item = item.copy()
+                decrypted_item["decrypted_password"] = aes.decrypt_login_password(
+                    item["login_password"]
+                )
+                decrypted_items.append(decrypted_item)
+            except Exception as e:
+                # Handle decryption errors gracefully
+                decrypted_items.append({
+                    **item,
+                    "decrypted_password": f"Error: {str(e)}"
+                })
+        return decrypted_items
