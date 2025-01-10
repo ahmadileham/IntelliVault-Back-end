@@ -1,16 +1,16 @@
 import random
 import string
-from rest_framework import viewsets, status, views
+from rest_framework import viewsets, status
 from rest_framework.response import Response
-from .models import GeneratedPassword, PasswordAnalysis, PasswordIssue
+from .models import GeneratedPassword, PasswordAnalysis
 from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
-from django.shortcuts import get_object_or_404
-from vault.models import Vault, LoginInfo
-from vault.utils import AESEncryption
 from .services import PasswordAnalyzer
 from django.db.models import Q
+from rest_framework.views import APIView
+from .services import HaveIBeenPwnedAPI
+from .utils import PasswordSimilarityChecker
 
 # Helper function to generate password based on user preferences
 def generate_password(length, use_uppercase, use_numbers, use_special_chars):
@@ -105,3 +105,29 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
             
         serializer = PasswordAnalysisSerializer(analysis)
         return Response(serializer.data)
+
+class CheckBreachView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        password = request.data.get('password')
+        if not password:
+            return Response({'error': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        hibp_api = HaveIBeenPwnedAPI()
+        breach_count = hibp_api.check_password(password)
+
+        return Response({'breach_count': breach_count}, status=status.HTTP_200_OK)
+
+class CheckSimilarityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        password = request.data.get('password')
+        if not password:
+            return Response({'error': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        similarity_checker = PasswordSimilarityChecker()
+        similarity_score = similarity_checker.calculate_similarity(password)
+
+        return Response({'similarity_score': similarity_score}, status=status.HTTP_200_OK)
