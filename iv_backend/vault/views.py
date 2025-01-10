@@ -551,49 +551,49 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return TeamVaultActionRequest.objects.filter(team_vault__team__memberships__user=self.request.user)
-
-    def list(self, request, *args, **kwargs):
-        status_param = request.query_params.get("status")
-        team_id = request.query_params.get("team")
-        vault_id = request.query_params.get("vault")
-
-        # Validate required `team_id`
+        return TeamVaultActionRequest.objects.filter(
+            team_vault__team__memberships__user=self.request.user
+        )
+    
+    @action(detail=False, methods=["get"], url_path="by-team")
+    def get_requests_by_team(self, request):
+        team_id = request.query_params.get("team_id")
         if not team_id:
-            return Response({"detail": "Team ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+            {"detail": "Team ID is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-        # Ensure the user is an admin for the team
-        team = get_object_or_404(Team, id=team_id)
-        self._ensure_user_is_admin(team, request.user)
+        team_requests = TeamVaultActionRequest.objects.filter(
+        team_vault__team__id=team_id,
+        team_vault__team__memberships__user=request.user,
+        )
 
-        # Base queryset
-        queryset = TeamVaultActionRequest.objects.filter(team_vault__team=team)
+        serializer = self.get_serializer(team_requests, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=["get"], url_path="by-team-vault")
+    def get_requests_by_team_vault(self, request):
+        team_vault_id = request.query_params.get("team_vault_id")
+        if not team_vault_id:
+            return Response(
+                {"detail": "Team Vault ID is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Fetch requests for the specific team_vault ID and validate access
+        team_vault_requests = TeamVaultActionRequest.objects.filter(
+            team_vault__id=team_vault_id,
+            team_vault__team__memberships__user=request.user,
+        )
 
-        # Filter by `vault_id` if provided
-        if vault_id:
-            queryset = queryset.filter(team_vault__id=vault_id)
-
-        # Filter by `status` if provided
-        if status_param == "pending":
-            queryset = queryset.filter(status=TeamVaultActionRequest.PENDING)
-        elif status_param in ["approved", "rejected"]:
-            queryset = queryset.filter(status=status_param)
-        elif status_param:
-            return Response({"detail": "Invalid status parameter."}, status=status.HTTP_400_BAD_REQUEST)
-
-        serialized_data = self.get_serializer(queryset, many=True).data
-        return Response(serialized_data, status=status.HTTP_200_OK)
-
-    def _ensure_user_is_admin(self, team, user):
-        """Ensure the requesting user is an admin for the team."""
-        if not TeamMembership.objects.filter(user=user, team=team, role=TeamMembership.ADMIN).exists():
-            raise PermissionDenied("Only team admins can view action requests.")
+        serializer = self.get_serializer(team_vault_requests, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         action_request = self._get_and_validate_action_request(pk)
-        self._ensure_user_is_admin(
-            action_request.team_vault.team, request.user)
+        self._ensure_user_is_admin(action_request.team_vault.team, request.user)
 
         if action_request.item_type == Item.LOGININFO:
             self._handle_login_info_action(action_request)
@@ -601,58 +601,71 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             self._handle_file_action(action_request)
 
         self._update_request_status(
-            action_request, TeamVaultActionRequest.APPROVED, request.user)
-        return Response({"detail": "Request approved successfully."}, status=status.HTTP_200_OK)
+            action_request, TeamVaultActionRequest.APPROVED, request.user
+        )
+        return Response(
+            {"detail": "Request approved successfully."}, status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
         action_request = self._get_and_validate_action_request(pk)
-        self._ensure_user_is_admin(
-            action_request.team_vault.team, request.user)
+        self._ensure_user_is_admin(action_request.team_vault.team, request.user)
 
         self._update_request_status(
-            action_request, TeamVaultActionRequest.REJECTED, request.user)
-        return Response({"detail": "Request rejected successfully."}, status=status.HTTP_200_OK)
+            action_request, TeamVaultActionRequest.REJECTED, request.user
+        )
+        return Response(
+            {"detail": "Request rejected successfully."}, status=status.HTTP_200_OK
+        )
 
     def _get_and_validate_action_request(self, pk):
         action_request = get_object_or_404(TeamVaultActionRequest, id=pk)
         if action_request.status != TeamVaultActionRequest.PENDING:
-            raise Response({'detail': 'Request has already been processed.'},
-                           status=status.HTTP_400_BAD_REQUEST)
+            raise Response(
+                {"detail": "Request has already been processed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return action_request
 
     def _ensure_user_is_admin(self, team, user):
+
         if not TeamMembership.objects.filter(user=user, team=team, role=TeamMembership.ADMIN).exists():
             raise PermissionDenied('Only team admins can approve/reject action requests.')
+
 
     def _handle_login_info_action(self, action_request):
         item_data = self._filter_item_data(action_request.item_data, LoginInfo)
 
         if action_request.action == TeamVaultActionRequest.CREATE:
-            vault = self._get_vault(item_data.pop('vault'))
+            item_data.pop("id")
+            vault = self._get_vault(item_data.pop("vault"))
             LoginInfo.objects.create(vault=vault, **item_data)
         elif action_request.action == TeamVaultActionRequest.UPDATE:
+
             vault = self._get_vault(item_data.pop('vault')) if 'vault' in item_data else None
             target = get_object_or_404(LoginInfo, id=item_data.get('id'))
+
             self._update_model_instance(target, item_data)
         elif action_request.action == TeamVaultActionRequest.DELETE:
-            LoginInfo.objects.filter(id=item_data.get('id')).delete()
+            LoginInfo.objects.filter(id=item_data.get("id")).delete()
 
     def _handle_file_action(self, action_request):
         item_data = self._filter_item_data(action_request.item_data, File)
         if "file_content" in item_data:
-            item_data["file_content"] = base64.b64decode(
-                item_data["file_content"])
+            item_data["file_content"] = base64.b64decode(item_data["file_content"])
 
         if action_request.action == TeamVaultActionRequest.CREATE:
-            vault = self._get_vault(item_data.pop('vault'))
+            vault = self._get_vault(item_data.pop("vault"))
             File.objects.create(vault=vault, **item_data)
         elif action_request.action == TeamVaultActionRequest.UPDATE:
+
             vault = self._get_vault(item_data.pop('vault')) if 'vault' in item_data else None
             target = get_object_or_404(File, id=item_data.get('id'))
+
             self._update_model_instance(target, item_data)
         elif action_request.action == TeamVaultActionRequest.DELETE:
-            File.objects.filter(id=item_data.get('id')).delete()
+            File.objects.filter(id=item_data.get("id")).delete()
 
     def _filter_item_data(self, item_data, model):
         model_fields = {field.name for field in model._meta.get_fields()}

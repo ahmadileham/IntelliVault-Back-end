@@ -1,4 +1,7 @@
 from rest_framework import serializers
+
+from authentication.serializers import CustomUserSerializer
+from authentication.models import CustomUser
 from .models import Vault, LoginInfo, File, SharedVault, SharedItem, TeamVaultActionRequest
 import base64
 
@@ -49,6 +52,9 @@ class SharedVaultSerializer(serializers.ModelSerializer):
         fields = ['share_link', 'shared_by', 'shared_at', 'expiry_date']
 
 class TeamVaultActionRequestSerializer(serializers.ModelSerializer):
+    requester = CustomUserSerializer()
+    authorized_by = CustomUserSerializer(allow_null=True)
+    team_vault = VaultSerializer()
     class Meta:
         model = TeamVaultActionRequest
         fields = [

@@ -12,6 +12,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from vault.models import Vault
 from vault.serializers import VaultSerializer
+from django.db.models import Q
+
 
 class TeamViewSet(viewsets.ModelViewSet):
     serializer_class = TeamSerializer
@@ -83,61 +85,49 @@ class TeamMembershipViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return TeamMembership.objects.filter(user=self.request.user)
+        # Only return team memberships for the authenticated user or for teams they are admin of
+        return TeamMembership.objects.filter(
+            Q(user=self.request.user) | 
+            Q(team__memberships__user=self.request.user, team__memberships__role=TeamMembership.ADMIN)
+        ).distinct()
 
     def perform_create(self, serializer):
+        # Set the user as the authenticated user when creating a team membership
         serializer.save(user=self.request.user)
 
     def perform_update(self, serializer):
         membership = self.get_object()
-        self._ensure_admin_privileges(membership.team)
+
+        # Ensure the user is an admin of the team
+        if not TeamMembership.objects.filter(user=self.request.user, team=membership.team, role=TeamMembership.ADMIN).exists():
+            raise PermissionDenied("Only team admins can modify roles.")
+        
         serializer.save()
 
-    def _ensure_admin_privileges(self, team):
-        """Check if the authenticated user is an admin of the specified team."""
+    def destroy(self, request, *args, **kwargs):
+        membership = self.get_object()
+
+        # Check if the user is the membership owner (removing their own membership)
+        if membership.user == request.user:
+            self.perform_destroy(membership)
+            return Response(
+                {"detail": "You have successfully left the team."},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        # Otherwise, ensure the user is an admin of the team
         if not TeamMembership.objects.filter(
-            user=self.request.user, team=team, role=TeamMembership.ADMIN
+            user=self.request.user, team=membership.team, role=TeamMembership.ADMIN
         ).exists():
-            raise PermissionDenied("Only team admins can perform this action.")
+            raise PermissionDenied("Only team admins can remove other members.")
 
-    def _ensure_not_self_action(self, membership):
-        """Prevent admins from performing certain actions on themselves."""
-        if membership.user == self.request.user:
-            raise PermissionDenied("Admins cannot perform this action on themselves.")
-
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    def leave_team(self, request, pk=None):
-        membership = get_object_or_404(TeamMembership, id=pk, user=request.user)
-
-        # Prevent the only admin from leaving the team
-        if membership.role == TeamMembership.ADMIN:
-            if TeamMembership.objects.filter(
-                team=membership.team, role=TeamMembership.ADMIN
-            ).count() <= 1:
-                return Response(
-                    {"detail": "You cannot leave the team as the only admin."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        membership.delete()
+        # Proceed with removing the member
+        self.perform_destroy(membership)
         return Response(
-            {"detail": "You have successfully left the team."},
-            status=status.HTTP_200_OK,
+            {"detail": "Team membership removed successfully."},
+            status=status.HTTP_204_NO_CONTENT
         )
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    def kick_member(self, request, pk=None):
-        membership = get_object_or_404(TeamMembership, id=pk)
-        team = membership.team
-
-        self._ensure_admin_privileges(team)
-        self._ensure_not_self_action(membership)
-
-        membership.delete()
-        return Response(
-            {"detail": f"{membership.user.username} has been removed from the team."},
-            status=status.HTTP_200_OK,
-        )
 
 
 class CreateInvitationView(APIView):
