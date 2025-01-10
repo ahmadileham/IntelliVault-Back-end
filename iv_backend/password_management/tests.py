@@ -123,3 +123,49 @@ class PasswordAnalysisTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('id', response.data)  # Check if analysis ID is returned
+
+
+class PasswordCheckTests(APITestCase):
+
+    def setUp(self):
+        # Create a user for authentication
+        self.user = User.objects.create_user(
+            username='testuser', password='testpass', email='testuser@example.com'
+        )
+        self.client.login(username='testuser', password='testpass')
+
+    def test_check_breach(self):
+        url = reverse('check-breach')  # Adjust the URL name as necessary
+        data = {
+            'password': 'password123'  # Replace with a password you want to test
+        }
+        response = self.client.post(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('breach_count', response.data)
+
+    def test_check_similarity(self):
+        url = reverse('check-similarity')  # Adjust the URL name as necessary
+        data = {
+            'password': 'password123'  # Replace with a password you want to test
+        }
+        response = self.client.post(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('similarity_score', response.data)
+
+    def test_check_breach_no_password(self):
+        url = reverse('check-breach')
+        data = {}
+        response = self.client.post(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+
+    def test_check_similarity_no_password(self):
+        url = reverse('check-similarity')
+        data = {}
+        response = self.client.post(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
