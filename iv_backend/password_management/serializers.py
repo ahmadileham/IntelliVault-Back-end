@@ -35,5 +35,5 @@ class PasswordAnalysisSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PasswordAnalysis
-        fields = ['id', 'user', 'team', 'analysis_date', 'reused_passwords_count',
+        fields = ['id', 'user', 'analysis_date', 'reused_passwords_count',
                   'similar_passwords_count', 'breached_passwords_count', 'issues']
