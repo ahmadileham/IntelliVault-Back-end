@@ -7,6 +7,7 @@ import base64
 
 
 class VaultSerializer(serializers.ModelSerializer):
+    owner = CustomUserSerializer()
     class Meta:
         model = Vault
         fields = ['id', 'owner', 'team', 'name']

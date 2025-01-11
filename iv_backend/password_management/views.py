@@ -2,6 +2,8 @@ import random
 import string
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+
+from vault.models import LoginInfo
 from .models import GeneratedPassword, PasswordAnalysis
 from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer
 from rest_framework.permissions import IsAuthenticated
@@ -76,19 +78,30 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return PasswordAnalysis.objects.filter(
-            Q(vault__owner=self.request.user) | 
-            Q(vault__team__memberships__user=self.request.user)
+            Q(issues__login_info__vault__owner=self.request.user) |
+            Q(issues__login_info__vault__team__memberships__user=self.request.user)
         ).distinct()
 
     @action(detail=False, methods=['post'])
     def analyze_passwords(self, request):
+        # Get all login infos
+        login_infos = LoginInfo.objects.filter(vault__owner=request.user, vault__team__isnull=True)
+
+        # Calculate total number of login infos
+        total_login_infos = login_infos.count()
         
         # Perform the analysis
         analyzer = PasswordAnalyzer()
         analysis = analyzer.perform_analysis(request.user)
-        
+
+        # Serialize the analysis
         serializer = PasswordAnalysisSerializer(analysis)
-        return Response(serializer.data)
+        
+        
+        response_data = serializer.data
+        response_data['total_login_infos'] = total_login_infos
+    
+        return Response(response_data)
 
     @action(detail=False, methods=['get'])
     def latest_analysis(self, request):
@@ -102,9 +115,18 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
                 {'error': 'No analysis found for this vault'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
-            
+
+        # Get all login infos
+        login_infos = LoginInfo.objects.filter(vault__owner=request.user, vault__team__isnull=True)
+
+        # Calculate total number of login infos
+        total_login_infos = login_infos.count()
+
         serializer = PasswordAnalysisSerializer(analysis)
-        return Response(serializer.data)
+        response_data = serializer.data
+        response_data['total_login_infos'] = total_login_infos
+    
+        return Response(response_data)
 
 class CheckBreachView(APIView):
     permission_classes = [IsAuthenticated]

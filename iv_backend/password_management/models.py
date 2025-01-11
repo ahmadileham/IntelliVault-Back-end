@@ -20,6 +20,7 @@ class PasswordAnalysis(models.Model):
     similar_passwords_count = models.IntegerField(default=0)
     breached_passwords_count = models.IntegerField(default=0)
     
+    
     class Meta:
         verbose_name_plural = "Password Analyses"
 
