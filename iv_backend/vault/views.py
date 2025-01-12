@@ -583,18 +583,28 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
         team_id = request.query_params.get("team_id")
         if not team_id:
             return Response(
-            {"detail": "Team ID is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+                {"detail": "Team ID is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Fetch requests for the specified team ID
         team_requests = TeamVaultActionRequest.objects.filter(
-        team_vault__team__id=team_id,
-        team_vault__team__memberships__user=request.user,
+            team_vault__team__id=team_id,
+            team_vault__team__memberships__user=request.user,
         )
 
+        # Serialize the data
         serializer = self.get_serializer(team_requests, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-    
+        serialized_data = serializer.data
+
+        # Decrypt passwords in the serialized data
+        try:
+            decrypted_data = self.decrypt_passwords(serialized_data)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(decrypted_data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["get"], url_path="by-team-vault")
     def get_requests_by_team_vault(self, request):
         team_vault_id = request.query_params.get("team_vault_id")
@@ -603,15 +613,50 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
                 {"detail": "Team Vault ID is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Fetch requests for the specific team_vault ID and validate access
+
+        # Fetch requests for the specified team_vault ID
         team_vault_requests = TeamVaultActionRequest.objects.filter(
             team_vault__id=team_vault_id,
             team_vault__team__memberships__user=request.user,
         )
 
+        # Serialize the data
         serializer = self.get_serializer(team_vault_requests, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        serialized_data = serializer.data
+
+        # Decrypt passwords in the serialized data
+        try:
+            decrypted_data = self.decrypt_passwords(serialized_data)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(decrypted_data, status=status.HTTP_200_OK)
+    
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        # Decrypt the login_password in item_data
+        data = serializer.data
+        try:
+            if data['item_type'] == 'logininfo' and 'login_password' in data['item_data']:
+                data['item_data']['login_password'] = aes.decrypt_login_password(data['item_data']['login_password'])
+        except Exception as e:
+            raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+        return Response(data)
+    
+    def decrypt_passwords(self, serialized_data):
+        """Decrypt passwords for a list of serialized data."""
+        decrypted_data = []
+        for item in serialized_data:
+            try:
+                decrypted_item = item.copy()
+                if item['item_type'] == 'logininfo' and 'login_password' in item['item_data']:
+                    decrypted_item['item_data']['login_password'] = aes.decrypt_login_password(
+                        item['item_data']['login_password'])
+                decrypted_data.append(decrypted_item)
+            except Exception as e:
+                raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+        return decrypted_data
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
@@ -708,6 +753,7 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
         if status == TeamVaultActionRequest.APPROVED:
             action_request.authorized_at = timezone.now()
         action_request.save()
+        
 
 class VaultItemsView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]

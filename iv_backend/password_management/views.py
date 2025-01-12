@@ -4,8 +4,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 
 from vault.models import LoginInfo
-from .models import GeneratedPassword, PasswordAnalysis
-from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer
+from .models import GeneratedPassword, PasswordAnalysis, PasswordIssue
+from .serializers import GeneratedPasswordSerializer, PasswordCreateSerializer, PasswordAnalysisSerializer,PasswordIssueSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from .services import PasswordAnalyzer
@@ -77,10 +77,7 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        return PasswordAnalysis.objects.filter(
-            Q(issues__login_info__vault__owner=self.request.user) |
-            Q(issues__login_info__vault__team__memberships__user=self.request.user)
-        ).distinct()
+        return PasswordAnalysis.objects.filter(user=self.request.user)
 
     @action(detail=False, methods=['post'])
     def analyze_passwords(self, request):
@@ -126,6 +123,45 @@ class PasswordAnalysisViewSet(viewsets.ModelViewSet):
         response_data = serializer.data
         response_data['total_login_infos'] = total_login_infos
     
+        return Response(response_data)
+    
+class PasswordIssueViewSet(viewsets.ModelViewSet):
+    serializer_class = PasswordIssueSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = PasswordIssue.objects.all()
+    # Get issues from a specific analysis
+    @action(detail=False, methods=['get'])
+    def get_issues_from_analysis(self, request):
+        analysis = PasswordAnalysis.objects.filter(user=request.user).order_by('-analysis_date').first()
+        if not analysis:
+            return Response({'error': 'No analysis found for this vault'}, status=status.HTTP_404_NOT_FOUND)
+        issues = analysis.issues.all()
+        grouped_issues = {}
+        for issue in issues:
+            login_info_id = issue.login_info.id
+            if login_info_id not in grouped_issues:
+                grouped_issues[login_info_id] = {
+                    'login_info': issue.login_info,
+                    'issues': []
+                }
+            grouped_issues[login_info_id]['issues'].append(issue)
+        # Prepare the response data
+        response_data = []
+        for entry in grouped_issues.values():
+            response_data.append({
+                'login_info': {
+                    'id': entry['login_info'].id,
+                    'login_username': entry['login_info'].login_username,
+                    # Add other fields from LoginInfo as needed
+                },
+                'issues': [
+                    {
+                        'issue_type': issue.issue_type,
+                        'similarity_score': issue.similarity_score,
+                        'details': issue.details,
+                    } for issue in entry['issues']
+                ]
+            })
         return Response(response_data)
 
 class CheckBreachView(APIView):
