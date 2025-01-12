@@ -12,6 +12,18 @@ class VaultSerializer(serializers.ModelSerializer):
         model = Vault
         fields = ['id', 'owner', 'team', 'name']
 
+class VaultWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vault
+        fields = ['id', 'owner','team', 'name']  # Exclude nested `owner`
+
+class VaultReadSerializer(serializers.ModelSerializer):
+    owner = CustomUserSerializer()  # Nested owner
+
+    class Meta:
+        model = Vault
+        fields = ['id', 'owner', 'team', 'name']
+
 
 class LoginInfoSerializer(serializers.ModelSerializer):
     class Meta:

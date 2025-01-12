@@ -3,7 +3,7 @@ from rest_framework import viewsets, permissions, views, status
 from rest_framework.response import Response
 from django.contrib.auth.hashers import check_password
 from .utils import AESEncryption, create_share_item, create_share_vault, unpack_shared_item
-from .serializers import VaultSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer, TeamVaultActionRequestSerializer
+from .serializers import VaultSerializer, VaultReadSerializer, VaultWriteSerializer, LoginInfoSerializer, FileSerializer, SharedItemSerializer, SharedVaultSerializer, TeamVaultActionRequestSerializer
 from .models import Vault, Item, LoginInfo, File, SharedVault, SharedItem, TeamVaultActionRequest
 from django.urls import reverse
 import mimetypes
@@ -35,24 +35,33 @@ aes = AESEncryption()
 
 
 class VaultViewSet(viewsets.ModelViewSet):
-    serializer_class = VaultSerializer
+    #serializer_class = VaultSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-
         return Vault.objects.filter(
-            Q(owner=self.request.user) | Q(
-                team__memberships__user=self.request.user)
+            Q(owner=self.request.user) | Q(team__memberships__user=self.request.user)
         ).distinct()
+    
+    def get_serializer_class(self):
+        """
+        Use `VaultReadSerializer` for GET requests (list/retrieve).
+        Use `VaultWriteSerializer` for POST/PUT/PATCH/DELETE requests.
+        """
+        if self.action in ['list', 'retrieve']:
+            return VaultReadSerializer  # Nested owner for GET
+        return VaultWriteSerializer  # Simple owner for POST/PUT/PATCH/DELETE
 
     def perform_create(self, serializer):
-        team_id = self.request.data.get('team')
+        team_id = self.request.data.get("team")
         if team_id:
             team = get_object_or_404(Team, id=team_id)
 
             # Ensure the user is an admin of the team
+
             if not TeamMembership.objects.filter(user=self.request.user, team=team, role=TeamMembership.ADMIN).exists():
                 raise PermissionDenied('Only team admins can create team vaults.')
+
 
             serializer.save(owner=self.request.user, team=team)
         else:
@@ -64,11 +73,13 @@ class VaultViewSet(viewsets.ModelViewSet):
         # Check if the vault is associated with a team
         if instance.team:
             # Ensure the user is an admin of the team
+
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
                 raise PermissionDenied('Only team admins can update team vaults.')
             
         if instance.owner != self.request.user:
             raise PermissionDenied('You do not have permission to modify this vault.')
+
 
         serializer.save()
 
@@ -77,10 +88,12 @@ class VaultViewSet(viewsets.ModelViewSet):
         if instance.team:
             # Ensure the user is an admin of the team
             if not TeamMembership.objects.filter(user=self.request.user, team=instance.team, role=TeamMembership.ADMIN).exists():
+
                 raise PermissionDenied('Only team admins can delete team vaults.')
         
         if instance.owner != self.request.user:
             raise PermissionDenied('You do not have permission to delete this vault.')
+
 
         instance.delete()
 
