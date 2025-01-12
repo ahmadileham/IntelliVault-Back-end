@@ -10,7 +10,8 @@ from .views import (
     AccessSharedVaultView,
     FileDownloadView,
      VaultItemsView,
-     TeamVaultActionRequestViewSet
+     TeamVaultActionRequestViewSet,
+     MyVaultItemsView
 )
 
 
@@ -41,4 +42,5 @@ urlpatterns = [
          AccessSharedVaultView.as_view(), name='access-shared-vault'),
 
      path('<int:vault_id>/items/', VaultItemsView.as_view(), name='vault-items'),
+    path('my-vault-items/', MyVaultItemsView.as_view(), name='my-vault-items'),
 ]
