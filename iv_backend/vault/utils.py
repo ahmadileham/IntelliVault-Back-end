@@ -42,7 +42,9 @@ class AESEncryption:
     def fetch_secret_key(self):
         try:
             # secret_response = self.client.secrets.kv.v1.read_secret(path="aes_key")
-            key_base64 = "XpQEX1R8S8N6C6LnYwGfL1D0lLr1vLdznB7N8X1j2Ew="
+            
+            key_base64 = "YKPwf4K5MKURpWu22OZJ08jZenL0/4ix1O11u74SJwo="
+            #key_base64 = "XpQEX1R8S8N6C6LnYwGfL1D0lLr1vLdznB7N8X1j2Ew="
             self.key = base64.b64decode(key_base64)
         except Exception as e:
             raise Exception("Failed to fetch AES key from Vault.") from e
