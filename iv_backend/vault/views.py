@@ -582,7 +582,36 @@ class TeamVaultActionRequestViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Invalid status parameter."}, status=status.HTTP_400_BAD_REQUEST)
 
         serialized_data = self.get_serializer(queryset, many=True).data
-        return Response(serialized_data, status=status.HTTP_200_OK)
+        decrypted_data = self.decrypt_passwords(serialized_data)
+        return Response(decrypted_data, status=status.HTTP_200_OK)
+    
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+
+        # Decrypt the login_password in item_data
+        data = serializer.data
+        try:
+            if data['item_type'] == 'logininfo' and 'login_password' in data['item_data']:
+                data['item_data']['login_password'] = aes.decrypt_login_password(data['item_data']['login_password'])
+        except Exception as e:
+            raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+
+        return Response(data)
+    
+    def decrypt_passwords(self, serialized_data):
+        """Decrypt passwords for a list of serialized data."""
+        decrypted_data = []
+        for item in serialized_data:
+            try:
+                decrypted_item = item.copy()
+                if item['item_type'] == 'logininfo' and 'login_password' in item['item_data']:
+                    decrypted_item['item_data']['login_password'] = aes.decrypt_login_password(
+                        item['item_data']['login_password'])
+                decrypted_data.append(decrypted_item)
+            except Exception as e:
+                raise ValidationError({"error": f"Password decryption failed: {str(e)}"})
+        return decrypted_data
 
     def _ensure_user_is_admin(self, team, user):
         """Ensure the requesting user is an admin for the team."""
