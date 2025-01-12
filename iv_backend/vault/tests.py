@@ -701,6 +701,56 @@ class LoginInfoTests(TestCase):
         # Check if the logininfo instance is not deleted
         self.assertEqual(LoginInfo.objects.count(), 1)
 
+    def test_cannot_update_logininfo_with_pending_request(self):
+        """Test that a LoginInfo with a pending action request cannot be updated."""
+        # Create a login info in team vault
+        login_info = LoginInfo.objects.create(
+            vault=self.team_vault,
+            login_username="test_user",
+            login_password="test_password"
+        )
+
+        # Create a pending update request
+        url = reverse('login-info-detail', args=[login_info.id])
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
+        response = self.client.patch(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+
+        # Try to update the same login info
+        url = reverse('login-info-detail', args=[login_info.id])
+        data = {"login_username": "another_update"}
+        response = self.client.patch(url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        
+        self.assertEqual(response.data['error']['error'], 'A pending action request already exists for this instance.')
+
+    def test_cannot_delete_logininfo_with_pending_request(self):
+        """Test that a LoginInfo with a pending action request cannot be deleted."""
+        # Create a login info in team vault
+        login_info = LoginInfo.objects.create(
+            vault=self.team_vault,
+            login_username="test_user",
+            login_password="test_password"
+        )
+
+        # Create a pending update request
+        url = reverse('login-info-detail', args=[login_info.id])
+        data = {"login_username": "updated_team_user",
+                "login_password": "updated_team_password"}
+        response = self.client.patch(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+
+        # Try to delete the same login info
+        url = reverse('login-info-detail', args=[login_info.id])
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['error'], 'A pending action request already exists for this instance.')
+
 
 class FileTests(TestCase):
     def setUp(self):
@@ -1353,6 +1403,70 @@ class FileTests(TestCase):
 
         # Check if the file instance is not deleted
         self.assertEqual(File.objects.count(), 1)
+
+    def test_cannot_update_file_with_pending_request(self):
+        """Test that a File with a pending action request cannot be updated."""
+        # Create a file in team vault
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to update file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.UPDATE)
+
+        # Try to update the same file
+        url = reverse('file-detail', args=[file_instance.id])
+        updated_file = self.create_in_memory_file("another_update.txt", "Updated content.")
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['error'], 'A pending action request already exists for this instance.')
+
+    def test_cannot_delete_file_with_pending_request(self):
+        """Test that a File with a pending action request cannot be deleted."""
+        # Create a file in team vault
+        file_instance = File.objects.create(
+            vault=self.team_vault,
+            file_name="testfile.txt",
+            file_content=aes.encrypt_file_content(b"Test content"),
+            mime_type="text/plain"
+        )
+
+        url = reverse('file-detail', args=[file_instance.id])
+
+        # Use helper to update file content
+        updated_file = self.create_in_memory_file(
+            "updatedfile.txt", "Updated content.")
+
+        data = {"file_uploaded": updated_file}
+        response = self.client.patch(url, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TeamVaultActionRequest.objects.count(), 1)
+        action_request = TeamVaultActionRequest.objects.first()
+        self.assertEqual(action_request.status, TeamVaultActionRequest.PENDING)
+        self.assertEqual(action_request.action, TeamVaultActionRequest.UPDATE)
+
+        # Try to delete the same file
+        url = reverse('file-detail', args=[file_instance.id])
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error']['error'], 'A pending action request already exists for this instance.')
 
 
 class FileDownloadTests(TestCase):
