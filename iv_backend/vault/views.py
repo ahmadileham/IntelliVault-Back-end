@@ -19,8 +19,16 @@ from django.utils import timezone
 from django.db.models import Q
 from .mixins import TeamRequestMixin, VaultItemValidationMixin
 import base64
+from iv_backend.model_utils import (
+    load_model,
+    predict,
+    load_model1,
+    extract_features,
+    predict1,
+)
 
-
+model = load_model()
+model1 = load_model1()
 aes = AESEncryption()
 
 
