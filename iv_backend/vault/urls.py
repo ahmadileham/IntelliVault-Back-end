@@ -9,6 +9,8 @@ from .views import (
     AccessSharedItemView,
     AccessSharedVaultView,
     FileDownloadView,
+    AIView,
+    AnotherAIView,
      VaultItemsView,
      TeamVaultActionRequestViewSet,
      MyVaultItemsView
@@ -27,6 +29,10 @@ urlpatterns = [
          FileDownloadView.as_view(), name='file-download'),
     path('file/download/<int:file_id>/<str:share_link>/',
          FileDownloadView.as_view(), name='file-download-shared'),
+     path('ai/',
+         AIView.as_view(), name='ai'),
+     path('phishing/',
+         AnotherAIView.as_view(), name='anotherai'),
 
 
     # Sharing URLs
