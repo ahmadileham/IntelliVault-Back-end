@@ -3,7 +3,7 @@
 ## Overview
 This project is a secure password management system that allows users to generate, analyze, and store passwords safely. It incorporates AI-assisted features to enhance password security by analyzing similarities with breached passwords and providing insights into password strength.
 
-## Features
+## Key Features
 - Analyze stored passwords for reuse, similarity, and breaches using AI techniques.
 - Share passwords securely within teams and other users, with role-based access control.
 - Utilizes AES encryption for secure storage of sensitive data.
